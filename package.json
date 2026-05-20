@@ -1,0 +1,20 @@
+{
+  "name": "agency-lambda-repo",
+  "type": "module",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "csv-parse": "^6.2.1",
+    "sst": "4.14.3"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "8.10.161"
+  }
+}

@@ -13,7 +13,16 @@ export async function callSharedUtil(functionName, payload = {}) {
     }),
   );
   const result = JSON.parse(Buffer.from(response.Payload).toString());
-  //console.log("Raw result from", functionName, ":", JSON.stringify(result));
+
+  // Lambda-level error (function crashed before handler ran)
+  if (result.errorType) {
+    console.log(
+      `[${functionName}] Lambda error: ${result.errorType}: ${result.errorMessage}`,
+    );
+    throw new Error(
+      `${functionName} Lambda error: ${result.errorType}: ${result.errorMessage}`,
+    );
+  }
 
   // Surface logs from called function into caller's log context
   if (result.logs && result.logs.length > 0) {

@@ -80,6 +80,7 @@ export const handler = async (event) => {
     sppProjectRequest,
   );
   console.log(`Project ID: ${projectRecord.id}`);
+
   const deleteResponse = await deleteExistingTasks(projectRecord.id);
 
   const inflationPlusDiscount =
@@ -161,6 +162,7 @@ export const handler = async (event) => {
     }
 
     const newAssignmentObj = {
+      projectid: projectRecord.id,
       projecttaskid: {
         value: matchingTaskObject.externalid,
         lookupBy: "externalid",
@@ -191,6 +193,7 @@ export const handler = async (event) => {
     accumulateProjectTotals(fileLines[i], projectCalculations);
   }
 
+  // create phases
   const phaseWriteRequest = {
     authObj: authObj,
     recordType: "Projecttask",
@@ -200,6 +203,30 @@ export const handler = async (event) => {
   const phaseWriteResponse = await callSharedUtil(
     "tslib-putRecords",
     phaseWriteRequest,
+  );
+
+  // create tasks
+  const taskWriteRequest = {
+    authObj: authObj,
+    recordType: "Projecttask",
+    writeObj: taskObjArray,
+  };
+
+  const taskWriteResponse = await callSharedUtil(
+    "tslib-putRecords",
+    taskWriteRequest,
+  );
+
+  // create assignments
+  const assignmentWriteRequest = {
+    authObj: authObj,
+    recordType: "Projecttaskassign",
+    writeObj: assignmentObjArray,
+  };
+
+  const assignmentWriteResponse = await callSharedUtil(
+    "tslib-putRecords",
+    assignmentWriteRequest,
   );
 
   projectCalculations.proj_direct_gm_percent__c =

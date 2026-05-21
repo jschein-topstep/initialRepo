@@ -66,9 +66,13 @@ async function buildUpsertXml(criteria, logs) {
               "tslib-getRecords",
               sppLookupRequest,
             );
-            logs.push(`Lookup ID: ${lookupRecord.id}`);
 
-            criteriaXML += `<${key}>${lookupRecord.id}</${key}>`;
+            if (lookupRecord?.id) {
+              logs.push(`Lookup ID: ${lookupRecord.id}`);
+              criteriaXML += `<${key}>${lookupRecord.id}</${key}>`;
+            } else {
+              logs.push(`Nothing returned for lookup request`);
+            }
           }
         } else {
           if (key === "date") {

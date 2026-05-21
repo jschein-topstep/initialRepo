@@ -119,13 +119,14 @@ export const handler = async (event) => {
       };
     }
 
-    logs.push(`SPP response: ${responseText}`);
+    //logs.push(`SPP response: ${responseText}`);
     const sppResponseXML = parser.parse(responseText);
+    logs.push(`ID: ${sppResponseXML.response.Read[event.recordType].id}`);
 
     return {
       statusCode: 200,
       logs,
-      body: sppResponseXML.response.Read,
+      body: sppResponseXML.response.Read[event.recordType],
     };
   } catch (err) {
     logs.push(`ERROR: ${err.message}`);
@@ -149,7 +150,7 @@ async function test() {
     },
     recordType: "Project",
     criteriaObj: {
-      id: 2578,
+      id: 4,
     },
     limit: 1,
   });

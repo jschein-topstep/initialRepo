@@ -121,7 +121,7 @@ export const handler = async (event) => {
 
     //logs.push(`SPP response: ${responseText}`);
     const sppResponseXML = parser.parse(responseText);
-    logs.push(`ID: ${sppResponseXML.response.Read[event.recordType].id}`);
+    //logs.push(`ID: ${sppResponseXML.response.Read[event.recordType].id}`);
 
     return {
       statusCode: 200,

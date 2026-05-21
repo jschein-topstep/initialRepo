@@ -41,10 +41,9 @@ async function deleteExistingTasks(projId) {
 }
 
 export const handler = async (event) => {
-  console.log(JSON.stringify(event));
   const bodyJSON = JSON.parse(event.body);
   const fileId = bodyJSON.fileId;
-  console.log(`fileId: ${fileId}`);
+
   const sppAttachmentRequest = {
     authObj: authObj,
     recordType: "Attachment",
@@ -63,26 +62,51 @@ export const handler = async (event) => {
     columns: true,
     skip_empty_lines: true,
   });
+
   const phaseNames = [];
-  console.log(`fileLines: ${JSON.stringify(fileLines)}`);
+  console.log(`headers: ${JSON.stringify(fileLines[0])}`);
+
+  const projectName = fileLines[0]["Project ID"];
+  const sppProjectRequest = {
+    authObj: authObj,
+    recordType: "Project",
+    criteriaObj: {
+      name: projectName,
+    },
+    limit: 1,
+  };
+  const projectRecord = await callSharedUtil(
+    "tslib-getRecords",
+    sppProjectRequest,
+  );
+  console.log(`Project ID: ${projectRecord.id}`);
+  const deleteResponse = await deleteExistingTasks(projectRecord.id);
+
+  const inflationPlusDiscount =
+    parseFloat(projectRecord.proj_inflation__c) +
+    parseFloat(projectRecord.proj_discount__c);
+
+  const projectCalculations = {
+    id: projectRecord.id,
+    proj_directs__c: 0,
+    proj_total_direct__c: inflationPlusDiscount,
+    proj_pt__c: 0,
+    proj_pt_fees__c: 0,
+    proj_pt_total__c: 0,
+    proj_ig__c: 0,
+    proj_contract_value__c: inflationPlusDiscount,
+    proj_direct_cost__c: 0,
+    proj_pt_cost__c: 0,
+    proj_ig_cost__c: 0,
+    proj_total_cost__c: 0,
+    proj_direct_gm__c: 0,
+    proj_direct_gm_percent__c: 0,
+    proj_project_gm__c: inflationPlusDiscount,
+    proj_project_gm_percent__c: 0,
+    proj_total_hours__c: 0,
+  };
+
   for (let i = 0; i < fileLines.length; i++) {
-    const projectName = fileLines[i]["Project ID"];
-    const sppProjectRequest = {
-      authObj: authObj,
-      recordType: "Project",
-      criteriaObj: {
-        name: projectName,
-      },
-      limit: 1,
-    };
-    const projectRecord = await callSharedUtil(
-      "tslib-getRecords",
-      sppProjectRequest,
-    );
-    console.log(`Project ID: ${projectRecord.id}`);
-
-    //const deleteResponse = await deleteExistingTasks(projectRecord.id);
-
     const sppPhaseWrite = {
       authObj: authObj,
       recordType: "Projecttask",
@@ -156,18 +180,71 @@ export const handler = async (event) => {
         assign_bid__c: fileLines[i]["Total Bid"],
       },
     };
-    const assignCreate = await callSharedUtil(
-      "tslib-putRecords",
-      sppAssignmentWrite,
-    );
-    console.log(`Assign ID: ${assignCreate.id}`);
-    /*const response = {
-      statusCode: 200,
-      body: `fileId: ${fileId}`,
-  };
-  return response;*/
+    const assignCreate = callSharedUtil("tslib-putRecords", sppAssignmentWrite);
+
+    accumulateProjectTotals(fileLines[i], projectCalculations);
   }
+
+  projectCalculations.proj_direct_gm_percent__c =
+    projectCalculations.proj_direct_gm__c / projectCalculations.proj_directs__c;
+  projectCalculations.proj_project_gm_percent__c =
+    projectCalculations.proj_project_gm__c /
+    projectCalculations.proj_contract_value__c;
+
+  const projectUpdateDetails = {
+    authObj: authObj,
+    recordType: "Project",
+    writeObj: projectCalculations,
+  };
+
+  const projectUpdate = callSharedUtil(
+    "tslib-putRecords",
+    projectUpdateDetails,
+  );
 };
+
+function accumulateProjectTotals(record, projectCalculations) {
+  const totalBid = parseFloat(record["Total Bid"]);
+  const totalCost = parseFloat(record["Total Cost"]);
+
+  projectCalculations.proj_total_hours__c += parseFloat(record["total hours"]);
+
+  if (record["Budget Category"] === "Directs") {
+    projectCalculations.proj_directs__c += totalBid;
+    projectCalculations.proj_total_direct__c += totalBid;
+    projectCalculations.proj_contract_value__c += totalBid;
+    projectCalculations.proj_direct_cost__c += totalCost;
+    projectCalculations.proj_total_cost__c += totalCost;
+    projectCalculations.proj_direct_gm__c += totalBid - totalCost;
+    projectCalculations.proj_project_gm__c += totalBid - totalCost;
+  }
+
+  if (record["Budget Category"] === "PT") {
+    projectCalculations.proj_pt__c += totalBid;
+    projectCalculations.proj_pt_total__c += totalBid;
+    projectCalculations.proj_contract_value__c += totalBid;
+    projectCalculations.proj_pt_cost__c += totalCost;
+    projectCalculations.proj_total_cost__c += totalCost;
+    projectCalculations.proj_project_gm__c += totalBid - totalCost;
+  }
+
+  if (record["Budget Cateogry"] === "Fees") {
+    projectCalculations.proj_pt_fees__c += totalBid;
+    projectCalculations.proj_pt_total__c += totalBid;
+    projectCalculations.proj_contract_value__c += totalBid;
+    projectCalculations.proj_pt_cost__c += totalCost;
+    projectCalculations.proj_total_cost__c += totalCost;
+    projectCalculations.proj_project_gm__c += totalBid - totalCost;
+  }
+
+  if (record["Budget Category"] === "Investigator Grants") {
+    projectCalculations.proj_ig__c += totalBid;
+    projectCalculations.proj_contract_value__c += totalBid;
+    projectCalculations.proj_ig_cost__c += totalCost;
+    projectCalculations.proj_total_cost__c += totalCost;
+    projectCalculations.proj_project_gm__c += totalBid - totalCost;
+  }
+}
 
 async function test() {
   const result = await handler({

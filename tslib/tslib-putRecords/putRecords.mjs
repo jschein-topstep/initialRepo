@@ -154,8 +154,8 @@ export const handler = async (event) => {
         "Content-Type": "application/json",
       },
       body:
-        sppResponseXML.response.Add[event.recordType] ||
-        sppResponseXML.response.Modify[event.recordType] ||
+        sppResponseXML.response.Add?.[event.recordType] ||
+        sppResponseXML.response.Modify?.[event.recordType] ||
         {},
     };
   } catch (err) {

@@ -26,6 +26,7 @@ async function deleteExistingTasks(projId) {
   const taskRecords = await callSharedUtil("tslib-getRecords", sppTaskRequest);
   console.log("tasks: ", JSON.stringify(taskRecords));
 
+  // finish this
   return;
 }
 

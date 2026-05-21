@@ -24,6 +24,7 @@ jobs:
             | sort -u \
             | grep -v '^\.github' \
             | grep -v '^shared' \
+            | grep -v '^node_modules' \
             | jq -R -s -c 'split("\n")[:-1]')
           echo "functions=$CHANGED" >> $GITHUB_OUTPUT
 

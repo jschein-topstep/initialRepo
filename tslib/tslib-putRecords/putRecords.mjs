@@ -7,7 +7,7 @@ const { callSharedUtil } = await import(sharedPath);
 
 const ssm = new SSMClient({});
 
-async function buildUpsertXml(xmlCriteria, logs) {
+async function buildUpsertXml(criteria, logs) {
   const sbResponse = await ssm.send(
     new GetParameterCommand({
       Name: "/spp/sandboxKey",
@@ -25,68 +25,78 @@ async function buildUpsertXml(xmlCriteria, logs) {
 
   const prodKey = prodResponse.Parameter.Value;
 
-  const apiKey = /^(sb|sandbox)$/i.test(xmlCriteria.authObj.instance)
+  const apiKey = /^(sb|sandbox)$/i.test(criteria.authObj.instance)
     ? sbKey
     : prodKey;
 
-  let criteriaXML = "";
-  let action = "Add";
+  let completeXML = "";
 
-  for (const key in xmlCriteria.writeObj) {
-    if (Object.prototype.hasOwnProperty.call(xmlCriteria.writeObj, key)) {
-      if (key === "id") {
-        action = "Modify";
-      }
+  // turns a single object into an array of one object
+  const writeObjs = Array.isArray(criteria.writeObj)
+    ? criteria.writeObj
+    : [criteria.writeObj];
 
-      if (typeof xmlCriteria.writeObj[key] === "object") {
-        const value = xmlCriteria.writeObj[key].value;
-        const lookupBy = xmlCriteria.writeObj[key].lookupBy;
-        const inTable = xmlCriteria.writeObj[key].inTable;
+  for (const writeObj of writeObjs) {
+    let criteriaXML = "";
+    let action = "Add";
 
-        const sppLookupRequest = {
-          authObj: xmlCriteria.authObj,
-          recordType: inTable,
-          criteriaObj: {
-            [lookupBy]: value,
-          },
-          limit: 1,
-        };
-        const lookupRecord = await callSharedUtil(
-          "tslib-getRecords",
-          sppLookupRequest,
-        );
-        logs.push(`Lookup ID: ${lookupRecord.id}`);
+    for (const key in writeObj) {
+      if (Object.prototype.hasOwnProperty.call(writeObj, key)) {
+        if (key === "id") {
+          action = "Modify";
+        }
 
-        criteriaXML += `<${key}>${lookupRecord.id}</${key}>`;
-      } else {
-        if (key === "date") {
-          const d = new Date(xmlCriteria.writeObj[key]);
-          const pad = (num) => {
-            return num.toString().padStart(2, "0");
-          };
-          const dateStr = `<Date><year>${d.getFullYear()}</year><month>${pad(d.getMonth() + 1)}</month><day>${pad(d.getDate())}</day></Date>`;
-          criteriaXML += `<${key}>${dateStr}</${key}>`;
+        if (typeof writeObj[key] === "object") {
+          const value = writeObj[key].value;
+          const lookupBy = writeObj[key].lookupBy;
+          const inTable = writeObj[key].inTable;
+
+          if (lookupBy === "externalid") {
+            criteriaXML += `<${key} external="${inTable}">${value}</${key}>`;
+          } else {
+            const sppLookupRequest = {
+              authObj: criteria.authObj,
+              recordType: inTable,
+              criteriaObj: {
+                [lookupBy]: value,
+              },
+              limit: 1,
+            };
+            const lookupRecord = await callSharedUtil(
+              "tslib-getRecords",
+              sppLookupRequest,
+            );
+            logs.push(`Lookup ID: ${lookupRecord.id}`);
+
+            criteriaXML += `<${key}>${lookupRecord.id}</${key}>`;
+          }
         } else {
-          criteriaXML += `<${key}>${xmlCriteria.writeObj[key]}</${key}>`;
+          if (key === "date") {
+            const d = new Date(writeObj[key]);
+            const pad = (num) => {
+              return num.toString().padStart(2, "0");
+            };
+            const dateStr = `<Date><year>${d.getFullYear()}</year><month>${pad(d.getMonth() + 1)}</month><day>${pad(d.getDate())}</day></Date>`;
+            criteriaXML += `<${key}>${dateStr}</${key}>`;
+          } else {
+            criteriaXML += `<${key}>${writeObj[key]}</${key}>`;
+          }
         }
       }
     }
+    completeXML += `<${action} type="${criteria.recordType}" enable_custom="1"><${criteria.recordType}>${criteriaXML}</${criteria.recordType}></${action}>`;
   }
 
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
       <request API_version="1.0" client="RW Manager" client_ver="1.0" namespace="default" key="${apiKey}">
         <Auth>
           <Login>
-                  <company>${xmlCriteria.authObj.company}</company>
-                  <user>${xmlCriteria.authObj.user}</user>
-                  <password>${xmlCriteria.authObj.password}</password>
+                  <company>${criteria.authObj.company}</company>
+                  <user>${criteria.authObj.user}</user>
+                  <password>${criteria.authObj.password}</password>
           </Login>
         </Auth>
-        <${action} type="${xmlCriteria.recordType}" enable_custom="1">
-          <${xmlCriteria.recordType}>
-            ${criteriaXML}
-          </${xmlCriteria.recordType}>
-        </${action}>
+          ${completeXML}
       </request>`;
 }
 
@@ -177,9 +187,14 @@ async function test() {
       instance: "sb",
     },
     recordType: "Jobcode",
-    writeObj: {
-      name: "delete this job code",
-    },
+    writeObj: [
+      {
+        name: "delete this job code 1",
+      },
+      {
+        name: "delete this job code 2",
+      },
+    ],
   });
   console.log(JSON.stringify(result, null, 2));
 }

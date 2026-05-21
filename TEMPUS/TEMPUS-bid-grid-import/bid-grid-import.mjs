@@ -106,41 +106,44 @@ export const handler = async (event) => {
     proj_total_hours__c: 0,
   };
 
+  const phaseObjArray = [];
+  const taskObjArray = [];
+  const assignmentObjArray = [];
   for (let i = 0; i < fileLines.length; i++) {
-    const sppPhaseWrite = {
-      authObj: authObj,
-      recordType: "Projecttask",
-      writeObj: {
+    let matchingPhaseObject = phaseObjArray.find(
+      (phase) => phase.name === fileLines[i]["Header"],
+    );
+
+    if (matchingPhaseObject === undefined) {
+      // the phase has not been encountered yet
+      const phaseExtId = `proj${projectRecord.id}_phase${phaseObjArray.length}`;
+      const newPhaseObj = {
         projectid: projectRecord.id,
         name: fileLines[i]["Header"],
         is_a_phase: 1,
-      },
-    };
-    let matchingObject = phaseNames.find(
-      (phase) => sppPhaseWrite.writeObj.name === fileLines[i]["Header"],
-    );
-    if (matchingObject === undefined) {
-      const phaseCreate = await callSharedUtil(
-        "tslib-putRecords",
-        sppPhaseWrite,
-      );
-      console.log(`Phase ID: ${phaseCreate.id}`);
-      const sppPhaseObj = {
-        id: phaseCreate.id,
-        name: fileLines[i]["Header"],
+        externalid: phaseExtId,
       };
-      phaseNames.push(sppPhaseObj);
-      matchingObject = sppPhaseObj;
+
+      phaseObjArray.push(newPhaseObj);
+      matchingPhaseObject = newPhaseObj;
     }
 
-    const sppTaskWrite = {
-      authObj: authObj,
-      recordType: "Projecttask",
-      writeObj: {
+    let matchingTaskObject = taskObjArray.find(
+      (task) => task.name === fileLines[i]["Unit Name"],
+    );
+
+    if (matchingTaskObject === undefined) {
+      // the task has not been encountered yet
+      const taskExtId = `proj${projectRecord.id}_task${taskObjArray.length}`;
+      const newTaskObj = {
         projectid: projectRecord.id,
         name: fileLines[i]["Unit Name"],
         is_a_phase: "",
-        parentid: matchingObject.id,
+        parentid: {
+          value: matchingPhaseObject.externalid,
+          lookupBy: "externalid",
+          inTable: "Projecttask",
+        },
         unit_budget_cat__c: fileLines[i]["Budget Category"],
         service: {
           value: fileLines[i]["Revenue Account"],
@@ -150,40 +153,54 @@ export const handler = async (event) => {
         id_number: fileLines[i]["Unit Number"],
         unit_basis__c: fileLines[i]["Unit Basis"],
         number_units__c: fileLines[i]["# of Units"],
+        externalid: taskExtId,
+      };
+
+      taskObjArray.push(newTaskObj);
+      matchingTaskObject = newTaskObj;
+    }
+
+    const newAssignmentObj = {
+      projecttaskid: {
+        value: matchingTaskObject.externalid,
+        lookupBy: "externalid",
+        inTable: "Projecttask",
       },
-    };
-    const taskCreate = await callSharedUtil("tslib-putRecords", sppTaskWrite);
-    console.log(`Task ID: ${taskCreate.id}`);
-    const sppAssignmentWrite = {
-      authObj: authObj,
-      recordType: "Projecttaskassign",
-      writeObj: {
-        projectid: projectRecord.id,
-        projecttaskid: taskCreate.id,
-        costCenter: {
-          value: fileLines[i]["Team"],
-          lookupBy: "name",
-          inTable: "Costcenter",
-        },
-        assign_functional_area__c: {
-          value: fileLines[i]["Functional Area"],
-          lookupBy: "name",
-          inTable: "Department",
-        },
-        userid: {
-          value: fileLines[i]["Bid Role"],
-          lookupBy: "name",
-          inTable: "User",
-        },
-        planned_hours: fileLines[i]["total hours"],
-        assign_cost__c: fileLines[i]["Total Cost"],
-        assign_bid__c: fileLines[i]["Total Bid"],
+      costCenter: {
+        value: fileLines[i]["Team"],
+        lookupBy: "name",
+        inTable: "Costcenter",
       },
+      assign_functional_area__c: {
+        value: fileLines[i]["Functional Area"],
+        lookupBy: "name",
+        inTable: "Department",
+      },
+      userid: {
+        value: fileLines[i]["Bid Role"],
+        lookupBy: "name",
+        inTable: "User",
+      },
+      planned_hours: fileLines[i]["total hours"],
+      assign_cost__c: fileLines[i]["Total Cost"],
+      assign_bid__c: fileLines[i]["Total Bid"],
     };
-    const assignCreate = callSharedUtil("tslib-putRecords", sppAssignmentWrite);
+
+    assignmentObjArray.push(newAssignmentObj);
 
     accumulateProjectTotals(fileLines[i], projectCalculations);
   }
+
+  const phaseWriteRequest = {
+    authObj: authObj,
+    recordType: "Projecttask",
+    writeObj: phaseObjArray,
+  };
+
+  const phaseWriteResponse = await callSharedUtil(
+    "tslib-putRecords",
+    phaseWriteRequest,
+  );
 
   projectCalculations.proj_direct_gm_percent__c =
     projectCalculations.proj_direct_gm__c / projectCalculations.proj_directs__c;

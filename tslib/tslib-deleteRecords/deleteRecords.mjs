@@ -1,15 +1,12 @@
 import { XMLParser } from "fast-xml-parser";
 import { SSMClient, GetParameterCommand } from "@aws-sdk/client-ssm";
-
 const sharedPath = process.env.AWS_LAMBDA_FUNCTION_NAME
   ? "/opt/nodejs/sharedUtils.js"
   : "../../shared/sharedUtils.js";
-
 const { callSharedUtil } = await import(sharedPath);
-
 const ssm = new SSMClient({});
 
-async function buildReadXml(xmlCriteria, logs) {
+async function buildDeleteXml(xmlCriteria, logs) {
   const sbResponse = await ssm.send(
     new GetParameterCommand({
       Name: "/spp/sandboxKey",
@@ -37,16 +34,6 @@ async function buildReadXml(xmlCriteria, logs) {
     }
   }
 
-  let fieldsXML = "";
-  if (xmlCriteria.fields) {
-    fieldsXML = "<_Return>";
-    const fieldArray = xmlCriteria.fields.split(",");
-    for (const key in fieldArray) {
-      fieldsXML += `<${fieldArray[key]}/>`;
-    }
-    fieldsXML += "</_Return>";
-  }
-
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
       <request API_version="1.0" client="RW Manager" client_ver="1.0" namespace="default" key="${apiKey}">
         <Auth>
@@ -56,11 +43,11 @@ async function buildReadXml(xmlCriteria, logs) {
                   <password>${xmlCriteria.authObj.password}</password>
           </Login>
         </Auth>
-        <Read type="${xmlCriteria.recordType}" method="equal to" limit="${xmlCriteria.limit}" enable_custom="1">
+        <Delete type="${xmlCriteria.recordType}">
           <${xmlCriteria.recordType}>
             ${criteriaXML}
           </${xmlCriteria.recordType}>${fieldsXML}
-        </Read>
+        </Delete>
       </request>`;
 }
 
@@ -87,15 +74,14 @@ export const handler = async (event) => {
     );
     const prodUrl = prodUrlResponse.Parameter.Value;
 
-    const xml = await buildReadXml(event, logs);
+    const xml = await buildDeleteXml(event, logs);
     logs.push(`xml: ${xml}`);
 
     const sppUrl = /^(sb|sandbox)$/i.test(event.authObj.instance)
       ? sbUrl
       : prodUrl;
 
-    logs.push(`sppUrl: ${sppUrl}`);
-
+    //console.log("sppUrl: ", sppUrl);
     const response = await fetch(sppUrl, {
       method: "POST",
       headers: {
@@ -110,23 +96,23 @@ export const handler = async (event) => {
       logs.push(`SPP error response: ${responseText}`);
       return {
         statusCode: response.status,
-        logs,
-        body: {
+        body: JSON.stringify({
           error: "SPP request failed",
           status: response.status,
           response: responseText,
-        },
+        }),
       };
     }
 
-    //logs.push(`SPP response: ${responseText}`);
-    const sppResponseXML = parser.parse(responseText);
-    logs.push(`ID: ${sppResponseXML.response.Read[event.recordType].id}`);
+    //console.log("SPP response:", responseText);
+    const sppResponseXML = parser.parse(responseText); // returns JSON from the XML
 
     return {
       statusCode: 200,
-      logs,
-      body: sppResponseXML.response.Read[event.recordType],
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: sppResponseXML.response.Delete,
     };
   } catch (err) {
     logs.push(`ERROR: ${err.message}`);
@@ -137,26 +123,3 @@ export const handler = async (event) => {
     };
   }
 };
-
-// ── Local testing only ──────────────────────────────────────────────────────
-
-async function test() {
-  const result = await handler({
-    authObj: {
-      company: "top step",
-      user: "jschein",
-      password: "Topstep1",
-      instance: "production",
-    },
-    recordType: "Project",
-    criteriaObj: {
-      id: 4,
-    },
-    limit: 1,
-  });
-  console.log(JSON.stringify(result, null, 2));
-}
-
-if (!process.env.AWS_LAMBDA_FUNCTION_NAME) {
-  test();
-}

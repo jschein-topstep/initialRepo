@@ -14,9 +14,10 @@ export async function callSharedUtil(functionName, payload = {}) {
   );
   const result = JSON.parse(Buffer.from(response.Payload).toString());
 
-  console.log("statusCode:", result.statusCode);
-  console.log("body:", JSON.stringify(result.body));
-  console.log("body type:", typeof result.body);
+  // Surface logs from called function into caller's log context
+  if (result.logs && result.logs.length > 0) {
+    result.logs.forEach((entry) => console.log(`[${functionName}] ${entry}`));
+  }
 
   if (result.statusCode !== 200) {
     throw new Error(`${functionName} error: ${JSON.stringify(result.body)}`);

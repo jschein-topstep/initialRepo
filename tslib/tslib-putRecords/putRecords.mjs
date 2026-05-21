@@ -153,10 +153,11 @@ export const handler = async (event) => {
       headers: {
         "Content-Type": "application/json",
       },
-      body:
+      /*body:
         sppResponseXML.response.Add[event.recordType] ||
         sppResponseXML.response.Modify[event.recordType] ||
-        {},
+        {},*/
+      body: {},
     };
   } catch (err) {
     logs.push(`ERROR: ${err.message}`);

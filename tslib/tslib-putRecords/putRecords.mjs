@@ -8,7 +8,7 @@ const { callSharedUtil } = await import(sharedPath);
 
 const ssm = new SSMClient({});
 
-async function buildUpsertXml(xmlCriteria) {
+async function buildUpsertXml(xmlCriteria, logs) {
   const sbResponse = await ssm.send(
     new GetParameterCommand({
       Name: "/spp/sandboxKey",
@@ -114,7 +114,7 @@ export const handler = async (event) => {
     );
     const prodUrl = prodUrlResponse.Parameter.Value;
 
-    const rawxml = await buildUpsertXml(event);
+    const rawxml = await buildUpsertXml(event, logs);
     const xml = rawxml.replace(/&/g, "&amp;");
     logs.push(`xml: ${xml}`);
 

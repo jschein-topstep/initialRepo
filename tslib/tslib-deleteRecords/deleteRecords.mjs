@@ -137,3 +137,26 @@ export const handler = async (event) => {
     };
   }
 };
+
+async function test() {
+  const result = await handler({
+    authObj: {
+      company: "top step sandbox",
+      user: "jschein",
+      password: "Topstep1",
+      instance: "sb",
+    },
+    recordType: "Task",
+    recordsToDelete: [
+      {
+        id: 154544,
+      },
+      { id: 155817 },
+    ],
+  });
+  console.log(JSON.stringify(result, null, 2));
+}
+
+if (!process.env.AWS_LAMBDA_FUNCTION_NAME) {
+  test();
+}

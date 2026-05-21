@@ -56,9 +56,9 @@ async function buildUpsertXml(xmlCriteria, logs) {
           "tslib-getRecords",
           sppLookupRequest,
         );
-        logs.push(`Lookup ID: ${lookupRecord[inTable].id}`);
+        logs.push(`Lookup ID: ${lookupRecord.id}`);
 
-        criteriaXML += `<${key}>${lookupRecord[inTable].id}</${key}>`;
+        criteriaXML += `<${key}>${lookupRecord.id}</${key}>`;
       } else {
         if (key === "date") {
           const d = new Date(xmlCriteria.writeObj[key]);

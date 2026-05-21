@@ -1,3 +1,17 @@
+/*
+Shape:
+  authObj - object, required
+    company - string, required
+    user - string, required
+    instance - string, required
+    password - string, required
+  recordType - string, required
+  lookupObj - object, required if recordsToDelete is not provided
+    FIELDNAME: FIELDVALUE - any number of these attributes
+  lookupType - string, required if recordsToDelete is not provided
+  recordsToDelete - array, required if lookupObj is not provided
+*/
+
 import { XMLParser } from "fast-xml-parser";
 import { SSMClient, GetParameterCommand } from "@aws-sdk/client-ssm";
 const sharedPath = process.env.AWS_LAMBDA_FUNCTION_NAME
@@ -6,7 +20,7 @@ const sharedPath = process.env.AWS_LAMBDA_FUNCTION_NAME
 const { callSharedUtil } = await import(sharedPath);
 const ssm = new SSMClient({});
 
-async function buildDeleteXml(xmlCriteria, logs) {
+async function buildDeleteXml(criteria, logs) {
   const sbResponse = await ssm.send(
     new GetParameterCommand({
       Name: "/spp/sandboxKey",
@@ -23,31 +37,31 @@ async function buildDeleteXml(xmlCriteria, logs) {
   );
   const prodKey = prodResponse.Parameter.Value;
 
-  const apiKey = /^(sb|sandbox)$/i.test(xmlCriteria.authObj.instance)
+  const apiKey = /^(sb|sandbox)$/i.test(criteria.authObj.instance)
     ? sbKey
     : prodKey;
 
-  let criteriaXML = "";
-  for (const key in xmlCriteria.criteriaObj) {
-    if (Object.prototype.hasOwnProperty.call(xmlCriteria.criteriaObj, key)) {
-      criteriaXML += `<${key}>${xmlCriteria.criteriaObj[key]}</${key}>`;
-    }
+  let deletionRecords = criteria.recordsToDelete || [];
+
+  if (criteria.lookupObj) {
+    // add record lookup, overwrite deletionRecords
   }
+
+  const xmlDeleteCommands = deletionRecords.map(
+    (record) =>
+      `<Delete type="${criteria.recordType}"><${criteria.recordType}><id>${typeof record === "object" ? record.id : record}</id></${criteria.recordType}></Delete>`,
+  );
 
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
       <request API_version="1.0" client="RW Manager" client_ver="1.0" namespace="default" key="${apiKey}">
         <Auth>
           <Login>
-                  <company>${xmlCriteria.authObj.company}</company>
-                  <user>${xmlCriteria.authObj.user}</user>
-                  <password>${xmlCriteria.authObj.password}</password>
+                  <company>${criteria.authObj.company}</company>
+                  <user>${criteria.authObj.user}</user>
+                  <password>${criteria.authObj.password}</password>
           </Login>
         </Auth>
-        <Delete type="${xmlCriteria.recordType}">
-          <${xmlCriteria.recordType}>
-            ${criteriaXML}
-          </${xmlCriteria.recordType}>${fieldsXML}
-        </Delete>
+        ${xmlDeleteCommands.join("")}
       </request>`;
 }
 

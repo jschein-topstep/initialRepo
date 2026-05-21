@@ -48,7 +48,7 @@ export const handler = async (event) => {
     sppAttachmentRequest,
   );
 
-  const base64 = atob(attachmentRecord.Attachment.base64_data);
+  const base64 = atob(attachmentRecord.base64_data);
   const fileLines = parse(base64, {
     columns: true,
     skip_empty_lines: true,
@@ -69,15 +69,15 @@ export const handler = async (event) => {
       "tslib-getRecords",
       sppProjectRequest,
     );
-    console.log(`Project ID: ${projectRecord.Project.id}`);
+    console.log(`Project ID: ${projectRecord.id}`);
 
-    const deleteResponse = await deleteExistingTasks(projectRecord.Project.id);
+    const deleteResponse = await deleteExistingTasks(projectRecord.id);
 
     const sppPhaseWrite = {
       authObj: authObj,
       recordType: "Projecttask",
       writeObj: {
-        projectid: projectRecord.Project.id,
+        projectid: projectRecord.id,
         name: fileLines[i]["Header"],
         is_a_phase: 1,
       },
@@ -90,9 +90,9 @@ export const handler = async (event) => {
         "tslib-putRecords",
         sppPhaseWrite,
       );
-      console.log(`Phase ID: ${phaseCreate.Projecttask.id}`);
+      console.log(`Phase ID: ${phaseCreate.id}`);
       const sppPhaseObj = {
-        id: phaseCreate.Projecttask.id,
+        id: phaseCreate.id,
         name: fileLines[i]["Header"],
       };
       phaseNames.push(sppPhaseObj);
@@ -103,7 +103,7 @@ export const handler = async (event) => {
       authObj: authObj,
       recordType: "Projecttask",
       writeObj: {
-        projectid: projectRecord.Project.id,
+        projectid: projectRecord.id,
         name: fileLines[i]["Unit Name"],
         is_a_phase: "",
         parentid: matchingObject.id,
@@ -119,13 +119,13 @@ export const handler = async (event) => {
       },
     };
     const taskCreate = await callSharedUtil("tslib-putRecords", sppTaskWrite);
-    console.log(`Task ID: ${taskCreate.Projecttask.id}`);
+    console.log(`Task ID: ${taskCreate.id}`);
     const sppAssignmentWrite = {
       authObj: authObj,
       recordType: "Projecttaskassign",
       writeObj: {
-        projectid: projectRecord.Project.id,
-        projecttaskid: taskCreate.Projecttask.id,
+        projectid: projectRecord.id,
+        projecttaskid: taskCreate.id,
         costCenter: {
           value: fileLines[i]["Team"],
           lookupBy: "name",
@@ -150,7 +150,7 @@ export const handler = async (event) => {
       "tslib-putRecords",
       sppAssignmentWrite,
     );
-    console.log(`Assign ID: ${assignCreate.Projecttaskassign.id}`);
+    console.log(`Assign ID: ${assignCreate.id}`);
     /*const response = {
       statusCode: 200,
       body: `fileId: ${fileId}`,

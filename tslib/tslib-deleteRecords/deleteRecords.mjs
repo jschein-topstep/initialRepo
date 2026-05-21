@@ -27,7 +27,9 @@ async function buildDeleteXml(criteria, logs) {
     ? sbKey
     : prodKey;
 
-  let deletionRecords = criteria.recordsToDelete || [];
+  let deletionRecords = Array.isArray(criteria.recordsToDelete)
+    ? criteria.recordsToDelete
+    : [criteria.recordsToDelete];
 
   if (criteria.lookupObj) {
     // add record lookup, overwrite deletionRecords

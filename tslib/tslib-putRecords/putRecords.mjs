@@ -181,18 +181,42 @@ export const handler = async (event) => {
 async function test() {
   const result = await handler({
     authObj: {
-      company: "top step sandbox",
-      user: "jschein",
-      password: "Topstep1",
-      instance: "sb",
+      company: "Tempus Sandbox",
+      user: "ronn.breaux@tempus.com",
+      instance: "SB",
+      password: "Spring2026$!",
     },
-    recordType: "Jobcode",
+    recordType: "Projecttask",
     writeObj: [
       {
-        name: "delete this job code 1",
+        projectid: 176,
+        name: "RegOps Management & Oversight Through Last Site Activated",
+        parentid: {
+          value: "proj176_phase0",
+          lookupBy: "externalid",
+          inTable: "Projecttask",
+        },
+        service: {
+          value: "4700 - HLS revenue",
+          lookupBy: "name",
+          inTable: "Category",
+        },
+        id_number: "1.02",
+        unit_basis__c: "month",
+        number_units__c: "13",
+        externalid: "proj176_task0",
       },
+
       {
-        name: "delete this job code 2",
+        projectid: 176,
+        name: "RegOps Management & Oversight: Enrollment Period Once All Sites Active",
+        parentid: {
+          value: "proj176_phase0",
+          lookupBy: "externalid",
+          inTable: "Projecttask",
+        },
+        id_number: "1.03",
+        externalid: "proj176_task1",
       },
     ],
   });

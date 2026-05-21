@@ -110,6 +110,7 @@ export const handler = async (event) => {
       logs.push(`SPP error response: ${responseText}`);
       return {
         statusCode: response.status,
+        logs,
         body: JSON.stringify({
           error: "SPP request failed",
           status: response.status,
@@ -123,6 +124,7 @@ export const handler = async (event) => {
 
     return {
       statusCode: 200,
+      logs,
       headers: {
         "Content-Type": "application/json",
       },

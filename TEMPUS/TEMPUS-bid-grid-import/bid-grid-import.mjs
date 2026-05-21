@@ -20,10 +20,21 @@ async function deleteExistingTasks(projId) {
       projectid: projId,
     },
     limit: 1000,
+    fields: "id",
   };
 
-  //const taskRecords = await callSharedUtil("tslib-getRecords", sppTaskRequest);
-  //console.log("tasks: ", JSON.stringify(taskRecords));
+  const taskRecords = await callSharedUtil("tslib-getRecords", sppTaskRequest);
+
+  const sppDeleteRequest = {
+    authObj: authObj,
+    recordType: "Projecttask",
+    recordsToDelete: taskRecords,
+  };
+
+  const deletedRecords = await callSharedUtil(
+    "tslib-deleteRecords",
+    sppDeleteRequest,
+  );
 
   // finish this
   return;

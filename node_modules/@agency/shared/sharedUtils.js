@@ -21,7 +21,9 @@ export async function callSharedUtil(functionName, payload = {}) {
   }
 
   if (result.statusCode !== 200) {
-    throw new Error(`${functionName} error: ${JSON.stringify(result.body)}`);
+    throw new Error(
+      `${functionName} error: status=${result.statusCode} body=${JSON.stringify(result.body)} logs=${JSON.stringify(result.logs)}`,
+    );
   }
 
   return result.body;

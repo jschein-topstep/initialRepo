@@ -1,0 +1,54 @@
+name: Deploy Lambda Functions
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      functions: ${{ steps.changes.outputs.functions }}
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 2
+
+      - name: Detect changed functions
+        id: changes
+        run: |
+          CHANGED=$(git diff --name-only HEAD~1 HEAD \
+            | grep '/' \
+            | cut -d'/' -f1 \
+            | sort -u \
+            | grep -v '^\.' \
+            | grep -v '^\.github' \
+            | jq -R -s -c 'split("\n")[:-1]')
+          echo "functions=$CHANGED" >> $GITHUB_OUTPUT
+
+  deploy:
+    needs: detect-changes
+    runs-on: ubuntu-latest
+    if: needs.detect-changes.outputs.functions != '[]'
+    strategy:
+      matrix:
+        function: ${{ fromJson(needs.detect-changes.outputs.functions) }}
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-2
+
+      - name: Deploy ${{ matrix.function }}
+        run: |
+          cd ${{ matrix.function }}
+          zip -r ../function.zip .
+          aws lambda update-function-code \
+            --function-name ${{ matrix.function }} \
+            --zip-file fileb://../function.zip
+          rm ../function.zip

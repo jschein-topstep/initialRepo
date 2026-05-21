@@ -2,13 +2,30 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "SST Live Debugger",
       "type": "node",
       "request": "launch",
-      "runtimeExecutable": "npx",
-      "runtimeArgs": ["sst", "dev"],
-      "console": "integratedTerminal",
-      "skipFiles": ["<node_internals>/**"]
+      "name": "Debug Lambda",
+      "program": "${workspaceFolder}/${input:functionFolder}/${input:functionFile}",
+      "env": {
+        "AWS_PROFILE": "default",
+        "AWS_REGION": "us-east-2",
+        "COMPANY": "Tempus Sandbox",
+        "USER": "ronn.breaux@tempus.com",
+        "PASSWORD": "Spring2026$!",
+        "INSTANCE": "SB"
+      }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "functionFolder",
+      "type": "promptString",
+      "description": "Function folder name (e.g. bid-grid-import)"
+    },
+    {
+      "id": "functionFile",
+      "type": "promptString",
+      "description": "Function file name (e.g. bid-grid-import.mjs)"
     }
   ]
 }

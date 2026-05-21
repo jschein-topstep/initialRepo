@@ -13,7 +13,7 @@ export async function callSharedUtil(functionName, payload = {}) {
     }),
   );
   const result = JSON.parse(Buffer.from(response.Payload).toString());
-  //console.log("Raw result from", functionName, ":", JSON.stringify(result));
+  console.log("Raw result from", functionName, ":", JSON.stringify(result));
 
   // Surface logs from called function into caller's log context
   if (result.logs && result.logs.length > 0) {

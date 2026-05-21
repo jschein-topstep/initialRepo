@@ -11,6 +11,7 @@ const authObj = {
   password: process.env.PASSWORD,
   instance: process.env.INSTANCE,
 };
+5;
 
 async function deleteExistingTasks(projId) {
   const sppTaskRequest = {
@@ -111,88 +112,89 @@ export const handler = async (event) => {
   const taskObjArray = [];
   const assignmentObjArray = [];
   for (let i = 0; i < fileLines.length; i++) {
-    let matchingPhaseObject = phaseObjArray.find(
-      (phase) => phase.name === fileLines[i]["Header"],
-    );
+    if (fileLines[i]["Header"]?.length > 0) {
+      let matchingPhaseObject = phaseObjArray.find(
+        (phase) => phase.name === fileLines[i]["Header"],
+      );
 
-    if (matchingPhaseObject === undefined) {
-      // the phase has not been encountered yet
-      const phaseExtId = `proj${projectRecord.id}_phase${phaseObjArray.length}`;
-      const newPhaseObj = {
+      if (matchingPhaseObject === undefined) {
+        // the phase has not been encountered yet
+        const phaseExtId = `proj${projectRecord.id}_phase${phaseObjArray.length}`;
+        const newPhaseObj = {
+          projectid: projectRecord.id,
+          name: fileLines[i]["Header"],
+          is_a_phase: 1,
+          externalid: phaseExtId,
+        };
+
+        phaseObjArray.push(newPhaseObj);
+        matchingPhaseObject = newPhaseObj;
+      }
+
+      let matchingTaskObject = taskObjArray.find(
+        (task) => task.name === fileLines[i]["Unit Name"],
+      );
+
+      if (matchingTaskObject === undefined) {
+        // the task has not been encountered yet
+        const taskExtId = `proj${projectRecord.id}_task${taskObjArray.length}`;
+        const newTaskObj = {
+          projectid: projectRecord.id,
+          name: fileLines[i]["Unit Name"],
+          is_a_phase: "",
+          parentid: {
+            value: matchingPhaseObject.externalid,
+            lookupBy: "externalid",
+            inTable: "Projecttask",
+          },
+          unit_budget_cat__c: fileLines[i]["Budget Category"],
+          service: {
+            value: fileLines[i]["Revenue Account"],
+            lookupBy: "name",
+            inTable: "Category",
+          },
+          id_number: fileLines[i]["Unit Number"],
+          unit_basis__c: fileLines[i]["Unit Basis"],
+          number_units__c: fileLines[i]["# of Units"],
+          externalid: taskExtId,
+        };
+
+        taskObjArray.push(newTaskObj);
+        matchingTaskObject = newTaskObj;
+      }
+
+      const newAssignmentObj = {
         projectid: projectRecord.id,
-        name: fileLines[i]["Header"],
-        is_a_phase: 1,
-        externalid: phaseExtId,
-      };
-
-      phaseObjArray.push(newPhaseObj);
-      matchingPhaseObject = newPhaseObj;
-    }
-
-    let matchingTaskObject = taskObjArray.find(
-      (task) => task.name === fileLines[i]["Unit Name"],
-    );
-
-    if (matchingTaskObject === undefined) {
-      // the task has not been encountered yet
-      const taskExtId = `proj${projectRecord.id}_task${taskObjArray.length}`;
-      const newTaskObj = {
-        projectid: projectRecord.id,
-        name: fileLines[i]["Unit Name"],
-        is_a_phase: "",
-        parentid: {
-          value: matchingPhaseObject.externalid,
+        projecttaskid: {
+          value: matchingTaskObject.externalid,
           lookupBy: "externalid",
           inTable: "Projecttask",
         },
-        unit_budget_cat__c: fileLines[i]["Budget Category"],
-        service: {
-          value: fileLines[i]["Revenue Account"],
+        costCenter: {
+          value: fileLines[i]["Team"],
           lookupBy: "name",
-          inTable: "Category",
+          inTable: "Costcenter",
         },
-        id_number: fileLines[i]["Unit Number"],
-        unit_basis__c: fileLines[i]["Unit Basis"],
-        number_units__c: fileLines[i]["# of Units"],
-        externalid: taskExtId,
+        assign_functional_area__c: {
+          value: fileLines[i]["Functional Area"],
+          lookupBy: "name",
+          inTable: "Department",
+        },
+        userid: {
+          value: fileLines[i]["Bid Role"],
+          lookupBy: "name",
+          inTable: "User",
+        },
+        planned_hours: fileLines[i]["total hours"],
+        assign_cost__c: fileLines[i]["Total Cost"],
+        assign_bid__c: fileLines[i]["Total Bid"],
       };
 
-      taskObjArray.push(newTaskObj);
-      matchingTaskObject = newTaskObj;
+      assignmentObjArray.push(newAssignmentObj);
+
+      accumulateProjectTotals(fileLines[i], projectCalculations);
     }
-
-    const newAssignmentObj = {
-      projectid: projectRecord.id,
-      projecttaskid: {
-        value: matchingTaskObject.externalid,
-        lookupBy: "externalid",
-        inTable: "Projecttask",
-      },
-      costCenter: {
-        value: fileLines[i]["Team"],
-        lookupBy: "name",
-        inTable: "Costcenter",
-      },
-      assign_functional_area__c: {
-        value: fileLines[i]["Functional Area"],
-        lookupBy: "name",
-        inTable: "Department",
-      },
-      userid: {
-        value: fileLines[i]["Bid Role"],
-        lookupBy: "name",
-        inTable: "User",
-      },
-      planned_hours: fileLines[i]["total hours"],
-      assign_cost__c: fileLines[i]["Total Cost"],
-      assign_bid__c: fileLines[i]["Total Bid"],
-    };
-
-    assignmentObjArray.push(newAssignmentObj);
-
-    accumulateProjectTotals(fileLines[i], projectCalculations);
   }
-
   // create phases
   const phaseWriteRequest = {
     authObj: authObj,
@@ -292,7 +294,7 @@ function accumulateProjectTotals(record, projectCalculations) {
 
 async function test() {
   const result = await handler({
-    body: '{"fileId":18}',
+    body: '{"fileId":19}',
   });
   console.log(JSON.stringify(result, null, 2));
 }

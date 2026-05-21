@@ -1,17 +1,3 @@
-/*
-Shape:
-  authObj - object, required
-    company - string, required
-    user - string, required
-    instance - string, required
-    password - string, required
-  recordType - string, required
-  lookupObj - object, required if recordsToDelete is not provided
-    FIELDNAME: FIELDVALUE - any number of these attributes
-  lookupType - string, required if recordsToDelete is not provided
-  recordsToDelete - array, required if lookupObj is not provided
-*/
-
 import { XMLParser } from "fast-xml-parser";
 import { SSMClient, GetParameterCommand } from "@aws-sdk/client-ssm";
 const sharedPath = process.env.AWS_LAMBDA_FUNCTION_NAME

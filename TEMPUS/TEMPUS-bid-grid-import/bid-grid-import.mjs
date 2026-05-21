@@ -81,7 +81,7 @@ export const handler = async (event) => {
     );
     console.log(`Project ID: ${projectRecord.id}`);
 
-    const deleteResponse = await deleteExistingTasks(projectRecord.id);
+    //const deleteResponse = await deleteExistingTasks(projectRecord.id);
 
     const sppPhaseWrite = {
       authObj: authObj,

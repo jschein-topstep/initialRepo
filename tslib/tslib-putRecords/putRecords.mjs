@@ -145,7 +145,7 @@ export const handler = async (event) => {
     }
 
     const sppResponseXML = parser.parse(responseText); // returns JSON from the XML
-    logs.push(`sppResponseXML: ${sppResponseXML}`);
+    logs.push(`sppResponseXML: ${JSON.stringify(sppResponseXML)}`);
 
     return {
       statusCode: 200,
@@ -153,11 +153,10 @@ export const handler = async (event) => {
       headers: {
         "Content-Type": "application/json",
       },
-      /*body:
+      body:
         sppResponseXML.response.Add[event.recordType] ||
         sppResponseXML.response.Modify[event.recordType] ||
-        {},*/
-      body: {},
+        {},
     };
   } catch (err) {
     logs.push(`ERROR: ${err.message}`);

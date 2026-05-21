@@ -19,11 +19,11 @@ jobs:
         id: changes
         run: |
           CHANGED=$(git diff --name-only HEAD~1 HEAD \
-            | grep '/' \
-            | cut -d'/' -f1 \
+            | grep -E '^[^.][^/]+/[^/]+/' \
+            | awk -F'/' '{print $1"/"$2}' \
             | sort -u \
-            | grep -v '^\.' \
             | grep -v '^\.github' \
+            | grep -v '^shared' \
             | jq -R -s -c 'split("\n")[:-1]')
           echo "functions=$CHANGED" >> $GITHUB_OUTPUT
 
@@ -46,9 +46,10 @@ jobs:
 
       - name: Deploy ${{ matrix.function }}
         run: |
+          FUNCTION_NAME=$(basename ${{ matrix.function }})
           cd ${{ matrix.function }}
-          zip -r ../function.zip .
+          zip -r ../../function.zip .
           aws lambda update-function-code \
-            --function-name ${{ matrix.function }} \
-            --zip-file fileb://../function.zip
-          rm ../function.zip
+            --function-name $FUNCTION_NAME \
+            --zip-file fileb://../../function.zip
+          rm ../../function.zip

@@ -2,7 +2,7 @@ import { parse } from "csv-parse/sync";
 
 const sharedPath = process.env.AWS_LAMBDA_FUNCTION_NAME
   ? "/opt/nodejs/sharedUtils.js"
-  : "../shared/sharedUtils.js";
+  : "../../shared/sharedUtils.js";
 
 const { callSharedUtil } = await import(sharedPath);
 

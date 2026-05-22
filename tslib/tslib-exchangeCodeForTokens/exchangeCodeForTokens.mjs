@@ -25,7 +25,9 @@ export const handler = async (event) => {
 
     // The auth server may return an error instead of a code
     if (error) {
-      console.error(`[exchangeCodeForTokens] Auth server error: ${error} — ${error_description}`);
+      console.error(
+        `[exchangeCodeForTokens] Auth server error: ${error} — ${error_description}`,
+      );
       return response(400, { error, error_description });
     }
 
@@ -38,42 +40,48 @@ export const handler = async (event) => {
     // Option B: encoded as the prefix of state ("spp:abc123")
     //   — useful if your auth server doesn't support extra query params
     let integrationKey = qs.integrationKey;
-    let expectedState  = state;
+    let expectedState = state;
 
     if (!integrationKey && state?.includes(":")) {
       [integrationKey, expectedState] = state.split(":", 2);
     }
 
     if (!integrationKey) {
-      return response(400, { error: "Cannot determine integrationKey from request" });
+      return response(400, {
+        error: "Cannot determine integrationKey from request",
+      });
     }
 
     // ── State verification (CSRF protection) ───────────────────────────
     const config = await getOAuthConfig(integrationKey);
 
-    if (config.state && config.state !== expectedState) {
-      console.error(`[exchangeCodeForTokens] State mismatch for "${integrationKey}"`);
+    if (config.state && config.state !== state) {
+      console.error(
+        `[exchangeCodeForTokens] State mismatch for "${integrationKey}"`,
+      );
       return response(400, { error: "State mismatch — possible CSRF attempt" });
     }
 
     // ── Exchange code for tokens ────────────────────────────────────────
     const params = new URLSearchParams({
-      grant_type:   "authorization_code",
+      grant_type: "authorization_code",
       code,
-      redirect_uri:  config.redirect_uri,
-      client_id:     config.client_id,
+      redirect_uri: config.redirect_uri,
+      client_id: config.client_id,
       client_secret: config.client_secret,
     });
 
     const tokenResponse = await fetch(config.token_url, {
-      method:  "POST",
+      method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body:    params.toString(),
+      body: params.toString(),
     });
 
     if (!tokenResponse.ok) {
       const errorText = await tokenResponse.text();
-      throw new Error(`Token exchange failed [${tokenResponse.status}]: ${errorText}`);
+      throw new Error(
+        `Token exchange failed [${tokenResponse.status}]: ${errorText}`,
+      );
     }
 
     const tokenData = await tokenResponse.json();
@@ -95,10 +103,9 @@ export const handler = async (event) => {
     return response(200, {
       message: `Authorization complete for "${integrationKey}"`,
       token_type: tokenData.token_type,
-      scope:      tokenData.scope,
+      scope: tokenData.scope,
       expires_in: tokenData.expires_in,
     });
-
   } catch (err) {
     console.error("[exchangeCodeForTokens] Error:", err);
     return response(500, { error: err.message });

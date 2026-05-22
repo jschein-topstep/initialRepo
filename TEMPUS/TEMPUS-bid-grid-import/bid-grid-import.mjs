@@ -82,7 +82,7 @@ export const handler = async (event) => {
   );
   console.log(`Project ID: ${projectRecord.id}`);
 
-  const deleteResponse = await deleteExistingTasks(projectRecord.id);
+  //const deleteResponse = await deleteExistingTasks(projectRecord.id);
 
   const inflationPlusDiscount =
     parseFloat(projectRecord.proj_inflation__c) +
@@ -195,6 +195,7 @@ export const handler = async (event) => {
       accumulateProjectTotals(fileLines[i], projectCalculations);
     }
   }
+
   // create phases
   const phaseWriteRequest = {
     authObj: authObj,
@@ -250,10 +251,11 @@ export const handler = async (event) => {
 };
 
 function accumulateProjectTotals(record, projectCalculations) {
-  const totalBid = parseFloat(record["Total Bid"]);
-  const totalCost = parseFloat(record["Total Cost"]);
+  const totalBid = parseFloat(record["Total Bid"]) || 0;
+  const totalCost = parseFloat(record["Total Cost"]) || 0;
 
-  projectCalculations.proj_total_hours__c += parseFloat(record["total hours"]);
+  projectCalculations.proj_total_hours__c +=
+    parseFloat(record["total hours"]) || 0;
 
   if (record["Budget Category"] === "Directs") {
     projectCalculations.proj_directs__c += totalBid;

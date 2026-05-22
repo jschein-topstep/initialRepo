@@ -3,7 +3,7 @@ import { SSMClient, GetParameterCommand } from "@aws-sdk/client-ssm";
 
 const sharedPath = process.env.AWS_LAMBDA_FUNCTION_NAME
   ? "/opt/nodejs/sharedUtils.js"
-  : "../../shared/sharedUtils.js";
+  : "../../shared/sharedUtils.js"; // adjust relative path as needed
 const { callSharedUtil } = await import(sharedPath);
 
 const oauthPath = process.env.AWS_LAMBDA_FUNCTION_NAME

@@ -30,6 +30,7 @@ async function buildUpsertXml(criteria, logs) {
     : prodKey;
 
   let completeXML = "";
+  const valueStore = [];
 
   // turns a single object into an array of one object
   const writeObjs = Array.isArray(criteria.writeObj)
@@ -54,24 +55,42 @@ async function buildUpsertXml(criteria, logs) {
           if (lookupBy === "externalid") {
             criteriaXML += `<${key} external="${inTable}">${value}</${key}>`;
           } else {
-            const sppLookupRequest = {
-              authObj: criteria.authObj,
-              recordType: inTable,
-              criteriaObj: {
-                [lookupBy]: value,
-              },
-              limit: 1,
-            };
-            const lookupRecord = await callSharedUtil(
-              "tslib-getRecords",
-              sppLookupRequest,
+            let idValue;
+            const foundStoredObject = valueStore.find(
+              (storedObject) =>
+                storedObject.inTable == inTable &&
+                storedObject.lookupBy == lookupBy &&
+                storedObject.value == value,
             );
 
-            if (lookupRecord?.id) {
-              logs.push(`Lookup ID: ${lookupRecord.id}`);
-              criteriaXML += `<${key}>${lookupRecord.id}</${key}>`;
+            if (foundStoredObject) {
+              criteriaXML += `<${key}>${foundStoredObject.idValue}</${key}>`;
             } else {
-              logs.push(`Nothing returned for lookup request`);
+              const sppLookupRequest = {
+                authObj: criteria.authObj,
+                recordType: inTable,
+                criteriaObj: {
+                  [lookupBy]: value,
+                },
+                limit: 1,
+              };
+              const lookupRecord = await callSharedUtil(
+                "tslib-getRecords",
+                sppLookupRequest,
+              );
+
+              if (lookupRecord?.id) {
+                logs.push(`Lookup ID: ${lookupRecord.id}`);
+                criteriaXML += `<${key}>${lookupRecord.id}</${key}>`;
+                valueStore.push({
+                  inTable: inTable,
+                  lookupBy: lookupBy,
+                  value: value,
+                  idValue: lookupRecord.id,
+                });
+              } else {
+                logs.push(`Nothing returned for lookup request`);
+              }
             }
           }
         } else {
@@ -200,7 +219,7 @@ async function test() {
           lookupBy: "externalid",
           inTable: "Projecttask",
         },
-        service: {
+        default_category: {
           value: "4700 - HLS revenue",
           lookupBy: "name",
           inTable: "Category",
@@ -220,6 +239,11 @@ async function test() {
           inTable: "Projecttask",
         },
         id_number: "1.03",
+        default_category: {
+          value: "4700 - HLS revenue",
+          lookupBy: "name",
+          inTable: "Category",
+        },
         externalid: "proj176_task1",
       },
     ],

@@ -82,7 +82,7 @@ export const handler = async (event) => {
   );
   console.log(`Project ID: ${projectRecord.id}`);
 
-  const deleteResponse = deleteExistingTasks(projectRecord.id);
+  const deleteResponse = await deleteExistingTasks(projectRecord.id);
 
   const inflationPlusDiscount =
     parseFloat(projectRecord.proj_inflation__c) +
@@ -243,7 +243,7 @@ export const handler = async (event) => {
     writeObj: projectCalculations,
   };
 
-  const projectUpdate = callSharedUtil(
+  const projectUpdate = await callSharedUtil(
     "tslib-putRecords",
     projectUpdateDetails,
   );

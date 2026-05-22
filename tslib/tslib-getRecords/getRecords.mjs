@@ -30,9 +30,11 @@ async function buildReadXml(xmlCriteria, logs) {
   );
   const prodKey = prodResponse.Parameter.Value;
 
-  const apiKey = /^(sb|sandbox)$/i.test(xmlCriteria.authObj.instance)
-    ? sbKey
-    : prodKey;
+  const instanceIdentifier = /^(sb|sandbox)$/i.test(
+    xmlCriteria.authObj.instance,
+  )
+    ? { apiKey: sbKey, suffix: "sb" }
+    : { apiKey: prodKey, suffix: "prod" };
 
   let criteriaXML = "";
   for (const key in xmlCriteria.criteriaObj) {
@@ -51,15 +53,15 @@ async function buildReadXml(xmlCriteria, logs) {
     fieldsXML += "</_Return>";
   }
 
-  const accessToken = await getValidAccessToken("spp-TEMPUS-sb");
+  const accessToken = await getValidAccessToken(
+    `spp-${xmlCriteria.authObj.company.toLowerCase()}-${instanceIdentifier.suffix}`,
+  );
 
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-      <request API_version="1.0" client="RW Manager" client_ver="1.0" namespace="default" key="${apiKey}">
+      <request API_version="1.0" client="RW Manager" client_ver="1.0" namespace="default" key="${instanceIdentifier.apiKey}">
         <Auth>
           <Login>
-                  <company>${xmlCriteria.authObj.company}</company>
-                  <user>${xmlCriteria.authObj.user}</user>
-                  <password>${xmlCriteria.authObj.password}</password>
+                  <access_token>${accessToken}</access_token>
           </Login>
         </Auth>
         <Read type="${xmlCriteria.recordType}" method="equal to" limit="${xmlCriteria.limit}" enable_custom="1">
@@ -149,10 +151,8 @@ export const handler = async (event) => {
 async function test() {
   const result = await handler({
     authObj: {
-      company: "top step",
-      user: "jschein",
-      password: "Topstep1",
-      instance: "production",
+      company: "Tempus Sandbox",
+      instance: "sandbox",
     },
     recordType: "Project",
     criteriaObj: {

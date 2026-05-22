@@ -4,7 +4,10 @@ const sharedPath = process.env.AWS_LAMBDA_FUNCTION_NAME
   ? "/opt/nodejs/sharedUtils.js"
   : "../../shared/sharedUtils.js";
 const { callSharedUtil } = await import(sharedPath);
-
+const oauthPath = process.env.AWS_LAMBDA_FUNCTION_NAME
+  ? "/opt/nodejs/oauthUtils.mjs"
+  : "../../layer/nodejs/oauthUtils.mjs"; // adjust relative path as needed
+const { getValidAccessToken } = await import(oauthPath);
 const ssm = new SSMClient({});
 
 async function buildUpsertXml(criteria, logs) {
@@ -25,9 +28,9 @@ async function buildUpsertXml(criteria, logs) {
 
   const prodKey = prodResponse.Parameter.Value;
 
-  const apiKey = /^(sb|sandbox)$/i.test(criteria.authObj.instance)
-    ? sbKey
-    : prodKey;
+  const instanceIdentifier = /^(sb|sandbox)$/i.test(criteria.authObj.instance)
+    ? { apiKey: sbKey, suffix: "sb" }
+    : { apiKey: prodKey, suffix: "prod" };
 
   let completeXML = "";
   const valueStore = [];
@@ -110,13 +113,15 @@ async function buildUpsertXml(criteria, logs) {
     completeXML += `<${action} type="${criteria.recordType}" enable_custom="1"><${criteria.recordType}>${criteriaXML}</${criteria.recordType}></${action}>`;
   }
 
+  const accessToken = await getValidAccessToken(
+    `spp-${criteria.authObj.company.toLowerCase()}-${instanceIdentifier.suffix}`,
+  );
+
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-      <request API_version="1.0" client="RW Manager" client_ver="1.0" namespace="default" key="${apiKey}">
+      <request API_version="1.0" client="RW Manager" client_ver="1.0" namespace="default" key="${instanceIdentifier.apiKey}">
         <Auth>
           <Login>
-                  <company>${criteria.authObj.company}</company>
-                  <user>${criteria.authObj.user}</user>
-                  <password>${criteria.authObj.password}</password>
+                  <access_token>${accessToken}</access_token>
           </Login>
         </Auth>
           ${completeXML}
@@ -205,9 +210,7 @@ async function test() {
   const result = await handler({
     authObj: {
       company: "Tempus Sandbox",
-      user: "ronn.breaux@tempus.com",
       instance: "SB",
-      password: "Spring2026$!",
     },
     recordType: "Projecttask",
     writeObj: [

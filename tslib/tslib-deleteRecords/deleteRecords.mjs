@@ -4,6 +4,10 @@ const sharedPath = process.env.AWS_LAMBDA_FUNCTION_NAME
   ? "/opt/nodejs/sharedUtils.js"
   : "../../shared/sharedUtils.js";
 const { callSharedUtil } = await import(sharedPath);
+const oauthPath = process.env.AWS_LAMBDA_FUNCTION_NAME
+  ? "/opt/nodejs/oauthUtils.mjs"
+  : "../../layer/nodejs/oauthUtils.mjs"; // adjust relative path as needed
+const { getValidAccessToken } = await import(oauthPath);
 const ssm = new SSMClient({});
 
 async function buildDeleteXml(criteria, logs) {
@@ -23,9 +27,9 @@ async function buildDeleteXml(criteria, logs) {
   );
   const prodKey = prodResponse.Parameter.Value;
 
-  const apiKey = /^(sb|sandbox)$/i.test(criteria.authObj.instance)
-    ? sbKey
-    : prodKey;
+  const instanceIdentifier = /^(sb|sandbox)$/i.test(criteria.authObj.instance)
+    ? { apiKey: sbKey, suffix: "sb" }
+    : { apiKey: prodKey, suffix: "prod" };
 
   let deletionRecords = Array.isArray(criteria.recordsToDelete)
     ? criteria.recordsToDelete
@@ -39,14 +43,15 @@ async function buildDeleteXml(criteria, logs) {
     (record) =>
       `<Delete type="${criteria.recordType}"><${criteria.recordType}><id>${typeof record === "object" ? record.id : record}</id></${criteria.recordType}></Delete>`,
   );
+  const accessToken = await getValidAccessToken(
+    `spp-${criteria.authObj.company.toLowerCase()}-${instanceIdentifier.suffix}`,
+  );
 
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-      <request API_version="1.0" client="RW Manager" client_ver="1.0" namespace="default" key="${apiKey}">
+      <request API_version="1.0" client="RW Manager" client_ver="1.0" namespace="default" key="${instanceIdentifier.apiKey}">
         <Auth>
           <Login>
-                  <company>${criteria.authObj.company}</company>
-                  <user>${criteria.authObj.user}</user>
-                  <password>${criteria.authObj.password}</password>
+                  <access_token>${accessToken}</access_token>
           </Login>
         </Auth>
         ${xmlDeleteCommands.join("")}

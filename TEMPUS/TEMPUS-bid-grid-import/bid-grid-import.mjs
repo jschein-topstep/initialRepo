@@ -11,7 +11,6 @@ const authObj = {
   password: process.env.PASSWORD,
   instance: process.env.INSTANCE,
 };
-5;
 
 async function deleteExistingTasks(projId) {
   const sppTaskRequest = {

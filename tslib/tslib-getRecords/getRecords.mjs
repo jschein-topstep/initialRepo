@@ -4,8 +4,12 @@ import { SSMClient, GetParameterCommand } from "@aws-sdk/client-ssm";
 const sharedPath = process.env.AWS_LAMBDA_FUNCTION_NAME
   ? "/opt/nodejs/sharedUtils.js"
   : "../../shared/sharedUtils.js";
-
 const { callSharedUtil } = await import(sharedPath);
+
+const oauthPath = process.env.AWS_LAMBDA_FUNCTION_NAME
+  ? "/opt/nodejs/oauthUtils.mjs"
+  : "../../layer/nodejs/oauthUtils.mjs"; // adjust relative path as needed
+const { getValidAccessToken } = await import(oauthPath);
 
 const ssm = new SSMClient({});
 
@@ -46,6 +50,8 @@ async function buildReadXml(xmlCriteria, logs) {
     }
     fieldsXML += "</_Return>";
   }
+
+  const accessToken = await getValidAccessToken("spp-TEMPUS-sb");
 
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
       <request API_version="1.0" client="RW Manager" client_ver="1.0" namespace="default" key="${apiKey}">

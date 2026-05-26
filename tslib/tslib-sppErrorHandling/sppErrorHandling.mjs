@@ -18,7 +18,7 @@ export async function getError(errorCode) {
   );
 
   if (!res.Item) {
-    throw new Error(`No error found for code: ${errorCode}`);
+    throw new Error(`No error found for spp err code: ${errorCode}`);
   }
   return unmarshall(res.Item);
 }

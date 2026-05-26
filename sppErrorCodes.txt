@@ -1,0 +1,1357 @@
+[
+  {
+    "errorCode": 1,
+    "description": "",
+    "errorMessage": "Unknown Error"
+  },
+  {
+    "errorCode": 2,
+    "description": "Command required a valid Auth, but Auth failed, or was left out of the request",
+    "errorMessage": "not logged in"
+  },
+  {
+    "errorCode": 3,
+    "description": "More arguments (XML records) were passed to a command than the command accepts",
+    "errorMessage": "too many arguments"
+  },
+  {
+    "errorCode": 4,
+    "description": "Fewer arguments were passed to a command than were expected",
+    "errorMessage": "too few arguments"
+  },
+  {
+    "errorCode": 5,
+    "description": "There is no command by that name, request failed",
+    "errorMessage": "Unknown Command"
+  },
+  {
+    "errorCode": 6,
+    "description": "Please use the URL you were provided with to access the API",
+    "errorMessage": "Access from an invalid URL"
+  },
+  {
+    "errorCode": 7,
+    "description": "Please upgrade your version of SuiteProjects Pro OffLine",
+    "errorMessage": "Invalid OffLine version"
+  },
+  {
+    "errorCode": 8,
+    "description": "The operation has failed, Please consult the Error record that was passed, this code is reserved for dynamically generated error codes",
+    "errorMessage": "Failure + Dynamic Message"
+  },
+  {
+    "errorCode": 9,
+    "description": "Your session is no longer valid, please issue a login command",
+    "errorMessage": "Logged out"
+  },
+  {
+    "errorCode": 10,
+    "description": "Invalid parameters were used, please consult documentation",
+    "errorMessage": "Invalid parameters"
+  },
+  {
+    "errorCode": 201,
+    "description": "create the company first, then create users",
+    "errorMessage": "invalid company"
+  },
+  {
+    "errorCode": 202,
+    "description": "a user with this nickname already exists, try another one",
+    "errorMessage": "duplicate user nick"
+  },
+  {
+    "errorCode": 203,
+    "description": "you need to specify both a Company object and a User object",
+    "errorMessage": "too few arguments"
+  },
+  {
+    "errorCode": 204,
+    "description": "Users must be created in the same namespace as the company",
+    "errorMessage": "Namespace error"
+  },
+  {
+    "errorCode": 205,
+    "description": "Invalid account workschedule specified",
+    "errorMessage": "Workschedule error"
+  },
+  {
+    "errorCode": 206,
+    "description": "Invalid role specified",
+    "errorMessage": "Role error"
+  },
+  {
+    "errorCode": 301,
+    "description": "this company nick is already in use, try another one",
+    "errorMessage": "duplicate company nick"
+  },
+  {
+    "errorCode": 302,
+    "description": "you need to specify both a Company and User object",
+    "errorMessage": "too few arguments"
+  },
+  {
+    "errorCode": 303,
+    "description": "The password entered was not hard enough to guess, please pick another to continue",
+    "errorMessage": "please pick a different password"
+  },
+  {
+    "errorCode": 304,
+    "description": "CreateAccount operation is not permitted",
+    "errorMessage": "Not enabled"
+  },
+  {
+    "errorCode": 305,
+    "description": "Edit of passwords is not allowed",
+    "errorMessage": "Not enabled to edit password"
+  },
+  {
+    "errorCode": 401,
+    "description": "The combination of usernick/companynick/password doesn't exist",
+    "errorMessage": "Auth failed : No such company/user/pass"
+  },
+  {
+    "errorCode": 402,
+    "description": "internal TB error",
+    "errorMessage": "Old TB login"
+  },
+  {
+    "errorCode": 403,
+    "description": "",
+    "errorMessage": "No Company name supplied"
+  },
+  {
+    "errorCode": 404,
+    "description": "",
+    "errorMessage": "No User name supplied"
+  },
+  {
+    "errorCode": 405,
+    "description": "",
+    "errorMessage": "No User Password supplied"
+  },
+  {
+    "errorCode": 406,
+    "description": "",
+    "errorMessage": "Invalid Company name"
+  },
+  {
+    "errorCode": 408,
+    "description": "",
+    "errorMessage": "Bad Password"
+  },
+  {
+    "errorCode": 409,
+    "description": "This account has been canceled",
+    "errorMessage": "Account Canceled"
+  },
+  {
+    "errorCode": 410,
+    "description": "this user has been made inactive by their administrator",
+    "errorMessage": "Inactive user"
+  },
+  {
+    "errorCode": 411,
+    "description": "There is a problem with the account. Contacting customer service will allow you to use the account again.",
+    "errorMessage": "Account conflict, contact customer service"
+  },
+  {
+    "errorCode": 412,
+    "description": "This account is not associated with the namespace provided",
+    "errorMessage": "Wrong namespace for account"
+  },
+  {
+    "errorCode": 413,
+    "description": "This user is not allowed to access the API functionality",
+    "errorMessage": "Account not privileged to access API"
+  },
+  {
+    "errorCode": 414,
+    "description": "The service is temporarily unavailable, please try back in a few minutes",
+    "errorMessage": "Temporarily unavailable"
+  },
+  {
+    "errorCode": 415,
+    "description": "This account is archived",
+    "errorMessage": "Account archived"
+  },
+  {
+    "errorCode": 416,
+    "description": "This user has been locked, please contact your Account Administrator",
+    "errorMessage": "User locked"
+  },
+  {
+    "errorCode": 417,
+    "description": "Access is not allow from this IP address",
+    "errorMessage": "Restricted IP address"
+  },
+  {
+    "errorCode": 418,
+    "description": "The uid passed in is not valid, please login",
+    "errorMessage": "Invalid uid session"
+  },
+  {
+    "errorCode": 419,
+    "description": "If used, a new session id maybe required.",
+    "errorMessage": "Authentication failed, please retry"
+  },
+  {
+    "errorCode": 420,
+    "description": "If the problem keeps reoccurring, please contact your identity vendor.",
+    "errorMessage": "Authentication failed"
+  },
+  {
+    "errorCode": 421,
+    "description": "Verify account configuration or check identity vendor if issue persists.",
+    "errorMessage": "Account misconfiguration or invalid assertion"
+  },
+  {
+    "errorCode": 423,
+    "description": "No permissions to read ServerStatus data",
+    "errorMessage": "No permissions to read ServerStatus data"
+  },
+  {
+    "errorCode": 424,
+    "description": "User is not allowed to modify another user's data",
+    "errorMessage": "No permissions to modify data"
+  },
+  {
+    "errorCode": 425,
+    "description": "The functionality is not available for your company",
+    "errorMessage": "Functionality not available"
+  },
+  {
+    "errorCode": 426,
+    "description": "",
+    "errorMessage": "You must use account-specific domain."
+  },
+  {
+    "errorCode": 501,
+    "description": "API access must first be authenticated",
+    "errorMessage": "API authentication required"
+  },
+  {
+    "errorCode": 502,
+    "description": "The request element must contain key & name attributes",
+    "errorMessage": "API authentication failed"
+  },
+  {
+    "errorCode": 503,
+    "description": "",
+    "errorMessage": "Invalid or missing key attribute"
+  },
+  {
+    "errorCode": 504,
+    "description": "",
+    "errorMessage": "Invalid or missing namespace attribute"
+  },
+  {
+    "errorCode": 505,
+    "description": "",
+    "errorMessage": "The namespace and key do not match"
+  },
+  {
+    "errorCode": 506,
+    "description": "This key has been disabled. Please contact support for more information",
+    "errorMessage": "Authentication key disabled"
+  },
+  {
+    "errorCode": 555,
+    "description": "Please make sure to observe the limit for input data set for your account",
+    "errorMessage": "You have exceeded the limit set for the account for input objects"
+  },
+  {
+    "errorCode": 556,
+    "description": "The limit of requests allowed for your company has been reached.",
+    "errorMessage": "XML API rate limit exceeded"
+  },
+  {
+    "errorCode": 557,
+    "description": "The limit of requests allowed for your company has been reached.",
+    "errorMessage": "SOAP API rate limit exceeded"
+  },
+  {
+    "errorCode": 601,
+    "description": "There isn't a record matching the id or code you asked for",
+    "errorMessage": "Invalid id/code"
+  },
+  {
+    "errorCode": 602,
+    "description": "",
+    "errorMessage": "Invalid field"
+  },
+  {
+    "errorCode": 603,
+    "description": "",
+    "errorMessage": "Invalid type or method"
+  },
+  {
+    "errorCode": 604,
+    "description": "Please contact your SuiteProjects Pro administrator to request more space",
+    "errorMessage": "Attachment size exceeds space available"
+  },
+  {
+    "errorCode": 605,
+    "description": "",
+    "errorMessage": "Limit clause must be specified and be less than the account limit for output data"
+  },
+  {
+    "errorCode": 606,
+    "description": "",
+    "errorMessage": "Projections are running, please try again in a few minutes"
+  },
+  {
+    "errorCode": 607,
+    "description": "",
+    "errorMessage": "Corrupted preference setting"
+  },
+  {
+    "errorCode": 701,
+    "description": "You must first delete all the records that have an index pointing to this record",
+    "errorMessage": "Cannot delete, failed dependency check"
+  },
+  {
+    "errorCode": 702,
+    "description": "The note could not be deleted",
+    "errorMessage": "Invalid note"
+  },
+  {
+    "errorCode": 703,
+    "description": "Delete failed",
+    "errorMessage": "Delete failed"
+  },
+  {
+    "errorCode": 800,
+    "description": "Failed to propagate the changes to identity sub-system. Please try again later.",
+    "errorMessage": "Synchronization failed"
+  },
+  {
+    "errorCode": 801,
+    "description": "The Customer ID you tried to associate with this Project does not exist, or is deleted",
+    "errorMessage": "Not a valid Customer ID"
+  },
+  {
+    "errorCode": 802,
+    "description": "Please select a different Envelope number, or specify none for auto-numbering",
+    "errorMessage": "This Envelope number is already taken"
+  },
+  {
+    "errorCode": 803,
+    "description": "The non-administrative user is trying to modify an administrator only record",
+    "errorMessage": "This user does not have permission to modify the record"
+  },
+  {
+    "errorCode": 804,
+    "description": "the only valid types are R and M",
+    "errorMessage": "Not a valid Item type"
+  },
+  {
+    "errorCode": 805,
+    "description": "The reference number is already in use, please select a different one",
+    "errorMessage": "Reference number in use"
+  },
+  {
+    "errorCode": 806,
+    "description": "You cannot modify tasks or tickets that have already been accepted by a signer",
+    "errorMessage": "Already accepted by signer"
+  },
+  {
+    "errorCode": 807,
+    "description": "The payment type passed is not valid (possibly inactive, or deleted)",
+    "errorMessage": "Invalid payment type"
+  },
+  {
+    "errorCode": 808,
+    "description": "The note you are trying to modify is not valid",
+    "errorMessage": "Invalid note"
+  },
+  {
+    "errorCode": 809,
+    "description": "The timesheet you specified for this task does not exist, or has been deleted",
+    "errorMessage": "Invalid Timesheet"
+  },
+  {
+    "errorCode": 810,
+    "description": "The index you specified doesn't exist in that table",
+    "errorMessage": "Invalid index"
+  },
+  {
+    "errorCode": 811,
+    "description": "One or more ids in the predecessor list could not be found",
+    "errorMessage": "Invalid predecessor"
+  },
+  {
+    "errorCode": 812,
+    "description": "The parentid field has an id that is not valid",
+    "errorMessage": "Invalid parentid"
+  },
+  {
+    "errorCode": 813,
+    "description": "The projectid specified doesn't exist, or was deleted",
+    "errorMessage": "Invalid projectid"
+  },
+  {
+    "errorCode": 814,
+    "description": "This id_number is already in use for this project",
+    "errorMessage": "duplicate id_number"
+  },
+  {
+    "errorCode": 815,
+    "description": "The Projecttask you specified does not exist",
+    "errorMessage": "Projecttask does not exist"
+  },
+  {
+    "errorCode": 816,
+    "description": "The role_id or type you specified is invalid",
+    "errorMessage": "User role/type does not exist"
+  },
+  {
+    "errorCode": 817,
+    "description": "The envelope id specified does not exist",
+    "errorMessage": "Invalid envelope"
+  },
+  {
+    "errorCode": 819,
+    "description": "This slip is part of an Invoice, and cannot be deleted",
+    "errorMessage": "Slip cannot be deleted"
+  },
+  {
+    "errorCode": 820,
+    "description": "The envelope cannot be modified because it is no longer open",
+    "errorMessage": "Envelope not open"
+  },
+  {
+    "errorCode": 821,
+    "description": "The timesheet cannot be modified, it has been submitted for approval",
+    "errorMessage": "Timesheet not open"
+  },
+  {
+    "errorCode": 822,
+    "description": "This slip cannot be edited",
+    "errorMessage": "Slip cannot be modified"
+  },
+  {
+    "errorCode": 823,
+    "description": "The slip is already in an invoice, and cannot be moved to another invoice",
+    "errorMessage": "Slip, bad invoice id"
+  },
+  {
+    "errorCode": 824,
+    "description": "The Customer/Prospect must have a valid name or company",
+    "errorMessage": "Must specify name or company"
+  },
+  {
+    "errorCode": 825,
+    "description": "The invoice id specified does not exist",
+    "errorMessage": "Invalid invoice"
+  },
+  {
+    "errorCode": 826,
+    "description": "",
+    "errorMessage": "date is required"
+  },
+  {
+    "errorCode": 827,
+    "description": "",
+    "errorMessage": "Reimbursements can only be applied after the envelope is approved"
+  },
+  {
+    "errorCode": 828,
+    "description": "Please select a different Invoice number, or specify none for auto-numbering",
+    "errorMessage": "This Invoice number is already taken"
+  },
+  {
+    "errorCode": 829,
+    "description": "The user you specified is invalid",
+    "errorMessage": "Not a valid user"
+  },
+  {
+    "errorCode": 830,
+    "description": "The booking type you specified is invalid",
+    "errorMessage": "Not a valid booking type"
+  },
+  {
+    "errorCode": 831,
+    "description": "You must specify startdate and enddate",
+    "errorMessage": "No startdate or enddate specified"
+  },
+  {
+    "errorCode": 832,
+    "description": "Startdate must be before enddate",
+    "errorMessage": "Illegal date range"
+  },
+  {
+    "errorCode": 833,
+    "description": "Percentage must be specified",
+    "errorMessage": "Percentage not specified"
+  },
+  {
+    "errorCode": 834,
+    "description": "Hours must be specified",
+    "errorMessage": "Hours not specified"
+  },
+  {
+    "errorCode": 835,
+    "description": "",
+    "errorMessage": "Only owner can edit this project"
+  },
+  {
+    "errorCode": 836,
+    "description": "You must have permission to add entity",
+    "errorMessage": "Not allowed to add entity"
+  },
+  {
+    "errorCode": 837,
+    "description": "You can only specify a currency currently enabled for the account",
+    "errorMessage": "Not a valid account currency"
+  },
+  {
+    "errorCode": 838,
+    "description": "You can only have one cost current record per user",
+    "errorMessage": "Not allowed to have more than one current costs per user"
+  },
+  {
+    "errorCode": 839,
+    "description": "",
+    "errorMessage": "base64_data must be set to add an attachment"
+  },
+  {
+    "errorCode": 840,
+    "description": "The primary filter set you specified is invalid",
+    "errorMessage": "Not a valid primary filter set"
+  },
+  {
+    "errorCode": 841,
+    "description": "Email is a required field",
+    "errorMessage": "Invalid email"
+  },
+  {
+    "errorCode": 842,
+    "description": "Period is a required field",
+    "errorMessage": "Invalid period"
+  },
+  {
+    "errorCode": 843,
+    "description": "Timing is a required field",
+    "errorMessage": "Invalid timing"
+  },
+  {
+    "errorCode": 844,
+    "description": "leave_accrual_ruleid is a required field",
+    "errorMessage": "Invalid leave accrual rule"
+  },
+  {
+    "errorCode": 845,
+    "description": "task is a required field",
+    "errorMessage": "Invalid task"
+  },
+  {
+    "errorCode": 846,
+    "description": "Your account or role is not configured for non-po purchase items",
+    "errorMessage": "Cannot create non-po purchase items"
+  },
+  {
+    "errorCode": 847,
+    "description": "Non-po purchase items should not be associated with a PO",
+    "errorMessage": "Purhaseorderid must be blank"
+  },
+  {
+    "errorCode": 848,
+    "description": "non-po must be set to 1",
+    "errorMessage": "Only non_po purchase items can be added/modified"
+  },
+  {
+    "errorCode": 849,
+    "description": "Overlapping records are not allowed",
+    "errorMessage": "Another record with the same date range already exists"
+  },
+  {
+    "errorCode": 850,
+    "description": "Only one default record can be added for the user and group",
+    "errorMessage": "Another record already exists as a default for this user and group"
+  },
+  {
+    "errorCode": 851,
+    "description": "The tag group attribute you specified is invalid",
+    "errorMessage": "Not a valid tag_group_attribute"
+  },
+  {
+    "errorCode": 852,
+    "description": "Another record with the same external_id is already present",
+    "errorMessage": "Duplicate external_id"
+  },
+  {
+    "errorCode": 853,
+    "description": "When current is set to '1', start and end dates must not be filled and vise versa",
+    "errorMessage": "Invalid Loaded Cost parameters"
+  },
+  {
+    "errorCode": 854,
+    "description": "Please modify your filter parameters to limit the data returned. If using Integration Manager, please contact SuiteProjects Pro support.",
+    "errorMessage": "Too many records requested"
+  },
+  {
+    "errorCode": 855,
+    "description": "Please separate your commands into separate requests.",
+    "errorMessage": "Number of commands passed in is greater than the account limit for the API"
+  },
+  {
+    "errorCode": 856,
+    "description": "The start or end dates you specified overlap with those of an existing record",
+    "errorMessage": "Date overlaps with existing record"
+  },
+  {
+    "errorCode": 857,
+    "description": "The date range specified exceeded maximum allowed",
+    "errorMessage": "Date range exceeded maximum"
+  },
+  {
+    "errorCode": 858,
+    "description": "Please note the update error",
+    "errorMessage": "ForexInput error"
+  },
+  {
+    "errorCode": 859,
+    "description": "The customer id specified doesn't exist or was deleted",
+    "errorMessage": "Invalid customer id"
+  },
+  {
+    "errorCode": 860,
+    "description": "Cannot set default_for_entity and start and end dates for the same record",
+    "errorMessage": "default_for_entity and start and end dates are mutually exclusive"
+  },
+  {
+    "errorCode": 861,
+    "description": "The customer id specified does not match the parent invoice customer id",
+    "errorMessage": "Invalid customer id"
+  },
+  {
+    "errorCode": 862,
+    "description": "The project id specified is not associated with the parent invoice customer",
+    "errorMessage": "Invalid project id"
+  },
+  {
+    "errorCode": 863,
+    "description": "The invoice specified is already associated with a different project",
+    "errorMessage": "Only one project per invoice"
+  },
+  {
+    "errorCode": 864,
+    "description": "There was an error saving the user workschedule",
+    "errorMessage": "Error while saving user workschedule"
+  },
+  {
+    "errorCode": 865,
+    "description": "Workdays must be a CSV list containing digits between 0 (Monday) and 6(Sunday)",
+    "errorMessage": "Invalid workdays"
+  },
+  {
+    "errorCode": 866,
+    "description": "Workday and workhour values are required when setting a user workschedule",
+    "errorMessage": "Invalid workdays or workhours"
+  },
+  {
+    "errorCode": 867,
+    "description": "Only one workhour value (the default) can be specified when updating a user workschedule",
+    "errorMessage": "Distinct workhours not enabled"
+  },
+  {
+    "errorCode": 868,
+    "description": "type must be filled and one of (project, user, customer)",
+    "errorMessage": "Invalid type specified"
+  },
+  {
+    "errorCode": 869,
+    "description": "primary_user_filterset can only be specified for one hierarchy of project type",
+    "errorMessage": "Invalid value for primary_user_filterset"
+  },
+  {
+    "errorCode": 870,
+    "description": "primary_dropdown_filter can only be specified for one hierarchy of project type",
+    "errorMessage": "Invalid value for primary_dropdown_filter"
+  },
+  {
+    "errorCode": 871,
+    "description": "The number of argument objects must equal the number of filter clauses",
+    "errorMessage": "Invalid number of read arguments supplied"
+  },
+  {
+    "errorCode": 872,
+    "description": "There is no cost type with specified id",
+    "errorMessage": "Invalid cost type"
+  },
+  {
+    "errorCode": 873,
+    "description": "Period must be specified",
+    "errorMessage": "Invalid period"
+  },
+  {
+    "errorCode": 874,
+    "description": "Please note the update error",
+    "errorMessage": "Schedule request error"
+  },
+  {
+    "errorCode": 875,
+    "description": "Please note the update error",
+    "errorMessage": "Repeat error"
+  },
+  {
+    "errorCode": 876,
+    "description": "Attachment size is too small",
+    "errorMessage": "Attachment too small"
+  },
+  {
+    "errorCode": 877,
+    "description": "project_group_id specified does not exist",
+    "errorMessage": "Invalid project group"
+  },
+  {
+    "errorCode": 878,
+    "description": "The purchase order cannot be modified because it is no longer open",
+    "errorMessage": "Purchaseorder not open"
+  },
+  {
+    "errorCode": 879,
+    "description": "The purchaseorder_id specified does not exist",
+    "errorMessage": "Invalid purchase order"
+  },
+  {
+    "errorCode": 880,
+    "description": "Non-PO purchase items must have positive quantity",
+    "errorMessage": "Invalid purchase item"
+  },
+  {
+    "errorCode": 881,
+    "description": "Specified parent ID doesn't exist or parent is in a different workspace",
+    "errorMessage": "Invalid attachment"
+  },
+  {
+    "errorCode": 882,
+    "description": "Specified reference slip doesn't exist or was deleted",
+    "errorMessage": "Invalid reference slip ID"
+  },
+  {
+    "errorCode": 883,
+    "description": "Specified portfolio project ID is invalid, doesn't exist or doesn't match customer",
+    "errorMessage": "Invalid portfolio project ID"
+  },
+  {
+    "errorCode": 884,
+    "description": "Portfolio project cannot be subordinated to another portfolio project",
+    "errorMessage": "Invalid portfolio link"
+  },
+  {
+    "errorCode": 885,
+    "description": "Mandatory date is missing in purchase item",
+    "errorMessage": "Invalid purchase item"
+  },
+  {
+    "errorCode": 886,
+    "description": "Project task type invalid, or project task not defined",
+    "errorMessage": "Project task type mismatch"
+  },
+  {
+    "errorCode": 887,
+    "description": "This project assignment profile ID is already taken for the project.",
+    "errorMessage": "Wrong project assignment profile name"
+  },
+  {
+    "errorCode": 888,
+    "description": "The task date is not within the required project task assignment date range",
+    "errorMessage": "Timesheet task invalid date"
+  },
+  {
+    "errorCode": 889,
+    "description": "This ticket cannot be edited",
+    "errorMessage": "Ticket cannot be modified"
+  },
+  {
+    "errorCode": 890,
+    "description": "This user cannot be edited",
+    "errorMessage": "User cannot be modified"
+  },
+  {
+    "errorCode": 891,
+    "description": "The user id specified does not exist",
+    "errorMessage": "Invalid user"
+  },
+  {
+    "errorCode": 892,
+    "description": "The envelope id specified does not exist",
+    "errorMessage": "Invalid envelope"
+  },
+  {
+    "errorCode": 893,
+    "description": "The receipt id specified does not exist",
+    "errorMessage": "Invalid receipt"
+  },
+  {
+    "errorCode": 894,
+    "description": "The timesheet id specified does not exist",
+    "errorMessage": "Invalid timesheet"
+  },
+  {
+    "errorCode": 895,
+    "description": "The customerpo id specified does not exist",
+    "errorMessage": "Invalid customerpo"
+  },
+  {
+    "errorCode": 896,
+    "description": "This agreement cannot be edited",
+    "errorMessage": "Agreement cannot be modified"
+  },
+  {
+    "errorCode": 897,
+    "description": "This customerpo cannot be edited",
+    "errorMessage": "Customerpo cannot be modified"
+  },
+  {
+    "errorCode": 898,
+    "description": "The workspace id specified does not exist",
+    "errorMessage": "Invalid workspace"
+  },
+  {
+    "errorCode": 899,
+    "description": "The expense_policy id specified does not exist",
+    "errorMessage": "Invalid expense policy"
+  },
+  {
+    "errorCode": 900,
+    "description": "The item id specified does not exist",
+    "errorMessage": "Invalid item"
+  },
+  {
+    "errorCode": 901,
+    "description": "the values passed don't combine to represent a valid page, check the values and try again",
+    "errorMessage": "The combination of uid, app, arg, and page is not valid"
+  },
+  {
+    "errorCode": 902,
+    "description": "Check to make sure the required fields are being passed in the arg record",
+    "errorMessage": "A valid record could not be created from the arg passed"
+  },
+  {
+    "errorCode": 903,
+    "description": "That combination of app, arg, and page is not valid for this user",
+    "errorMessage": "The user does not have access to that page"
+  },
+  {
+    "errorCode": 904,
+    "description": "Please select a different Purchaseorder number, or specify none for auto-numbering",
+    "errorMessage": "This Purchaseorder number is already taken"
+  },
+  {
+    "errorCode": 905,
+    "description": "The purchaseorder id specified does not exist",
+    "errorMessage": "Invalid purchaseorder"
+  },
+  {
+    "errorCode": 906,
+    "description": "The cost_centerid specified does not exist or is inactive",
+    "errorMessage": "Invalid Cost Center"
+  },
+  {
+    "errorCode": 907,
+    "description": "First name, Last name and email are required fields",
+    "errorMessage": "Invalid Contact"
+  },
+  {
+    "errorCode": 908,
+    "description": "Please specify a valid name for the record",
+    "errorMessage": "Invalid name"
+  },
+  {
+    "errorCode": 909,
+    "description": "The contact must exist, and belong to the same Customer",
+    "errorMessage": "Invalid Contact"
+  },
+  {
+    "errorCode": 910,
+    "description": "One or more lookup fields specified for the record do not exist",
+    "errorMessage": "Lookup record not located"
+  },
+  {
+    "errorCode": 911,
+    "description": "Timesheet id must be specified to edit a task",
+    "errorMessage": "No Timesheet specified"
+  },
+  {
+    "errorCode": 912,
+    "description": "Type must be set",
+    "errorMessage": "Invalid type Specified"
+  },
+  {
+    "errorCode": 913,
+    "description": "Project task must belong to a project specified",
+    "errorMessage": "Invalid project task specified for a project"
+  },
+  {
+    "errorCode": 914,
+    "description": "An existing resourceprofile_type id must be specified",
+    "errorMessage": "Invalid resourceprofile_type_id"
+  },
+  {
+    "errorCode": 915,
+    "description": "The type and resourceprofile_type_id must be provided and must match the id-type pair in an existing record in the resourceprofile_type table",
+    "errorMessage": "Invalid type specified"
+  },
+  {
+    "errorCode": 916,
+    "description": "Make sure you selected correct association",
+    "errorMessage": "Table specified does not have external_id field"
+  },
+  {
+    "errorCode": 917,
+    "description": "Please select a different Issue number, or specify none for auto-numbering",
+    "errorMessage": "This Issue number is already taken"
+  },
+  {
+    "errorCode": 918,
+    "description": "Issue description must be set",
+    "errorMessage": "No description specified"
+  },
+  {
+    "errorCode": 919,
+    "description": "Only one issue stage may be marked as default_for_new",
+    "errorMessage": "Only one default issue stage is permitted"
+  },
+  {
+    "errorCode": 920,
+    "description": "Rate card ID must be specified",
+    "errorMessage": "No rate card ID specified"
+  },
+  {
+    "errorCode": 921,
+    "description": "The supplied job code is already in use for the associated rate card",
+    "errorMessage": "Job code in use for rate card"
+  },
+  {
+    "errorCode": 922,
+    "description": "An existing job code must be specified",
+    "errorMessage": "Invalid job code specified"
+  },
+  {
+    "errorCode": 923,
+    "description": "An existing rate card must be specified",
+    "errorMessage": "Invalid rate card specified"
+  },
+  {
+    "errorCode": 924,
+    "description": "Job code ID must be specified",
+    "errorMessage": "No job code ID specified"
+  },
+  {
+    "errorCode": 925,
+    "description": "A valid project ID must be supplied for the template project ID",
+    "errorMessage": "Invalid template project ID specified"
+  },
+  {
+    "errorCode": 926,
+    "description": "User cost must contain a valid value",
+    "errorMessage": "Inavlid value for user cost"
+  },
+  {
+    "errorCode": 927,
+    "description": "User cost start date must not be before any previous cost start date",
+    "errorMessage": "Invalid user cost start date"
+  },
+  {
+    "errorCode": 928,
+    "description": "Project group ID must contain a valid value",
+    "errorMessage": "Invalid project group ID for workspace user"
+  },
+  {
+    "errorCode": 929,
+    "description": "Only project group ID or user ID can be set",
+    "errorMessage": "Workspace user cannot contain both project group ID and user ID"
+  },
+  {
+    "errorCode": 930,
+    "description": "Cannot change generic resources into users and vice versa",
+    "errorMessage": "generic flag cannot be modified"
+  },
+  {
+    "errorCode": 931,
+    "description": "A user can only be assigned to a project once",
+    "errorMessage": "Duplicate project assignment"
+  },
+  {
+    "errorCode": 932,
+    "description": "Only users in the administrator role may update proxy information",
+    "errorMessage": "Only admin users may update proxies"
+  },
+  {
+    "errorCode": 933,
+    "description": "The proxy user id you specified is invalid",
+    "errorMessage": "Not a valid proxy user"
+  },
+  {
+    "errorCode": 934,
+    "description": "There was an error while creating a project from a template project",
+    "errorMessage": "Error while creating project from template"
+  },
+  {
+    "errorCode": 935,
+    "description": "User tag start date must not be before any previous tag start date",
+    "errorMessage": "Inavlid user tag start date"
+  },
+  {
+    "errorCode": 936,
+    "description": "There was an error while creating project group assignments",
+    "errorMessage": "Error while creating project group assignments"
+  },
+  {
+    "errorCode": 937,
+    "description": "An existing agreement must be specified",
+    "errorMessage": "Invalid agreement ID specified"
+  },
+  {
+    "errorCode": 938,
+    "description": "A unique project_id and agreement_id pair must be specified",
+    "errorMessage": "Duplicate agreement_to_project"
+  },
+  {
+    "errorCode": 939,
+    "description": "Please check that the user logged in has the required role",
+    "errorMessage": "view is not allowed for this user"
+  },
+  {
+    "errorCode": 940,
+    "description": "Please check that the project is configured for dashboard view",
+    "errorMessage": "Dashboard view is not allowed for this project"
+  },
+  {
+    "errorCode": 941,
+    "description": "Timezone string must contain a +/- sign, four digit offset and optionally a single letter,e.g.: -0500,+0330,+1300a",
+    "errorMessage": "Invalid timezone specified for user"
+  },
+  {
+    "errorCode": 942,
+    "description": "Loaded costs are not allowed for generic resources",
+    "errorMessage": "Loaded costs not allowed for generic resources"
+  },
+  {
+    "errorCode": 943,
+    "description": "Project names must be unique by customer",
+    "errorMessage": "Duplicate project name"
+  },
+  {
+    "errorCode": 944,
+    "description": "Date must be a valid value",
+    "errorMessage": "Invalid date"
+  },
+  {
+    "errorCode": 945,
+    "description": "An existing Project budget group must be specified",
+    "errorMessage": "Invalid Project budget group ID specified"
+  },
+  {
+    "errorCode": 946,
+    "description": "An existing Project budget rule must be specified",
+    "errorMessage": "Invalid Project budget rule ID specified"
+  },
+  {
+    "errorCode": 947,
+    "description": "A project can have only one expense policy associated",
+    "errorMessage": "Project already has an expense policy"
+  },
+  {
+    "errorCode": 948,
+    "description": "A unique expense_policy_id and item_id pair must be specified",
+    "errorMessage": "Duplicate item id for expense policy"
+  },
+  {
+    "errorCode": 949,
+    "description": "An existing Resourceprofile_type must be specified",
+    "errorMessage": "Invalid Resourceprofile_type ID specified"
+  },
+  {
+    "errorCode": 950,
+    "description": "An existing Attribute must be specified",
+    "errorMessage": "Invalid Attribute ID specified"
+  },
+  {
+    "errorCode": 951,
+    "description": "A unique attribute_id and resourceprofile_type_id pair must be specified",
+    "errorMessage": "Duplicate Attribute for Resourceprofile_type"
+  },
+  {
+    "errorCode": 952,
+    "description": "The entry must be unique for given user",
+    "errorMessage": "Duplicate entry for user"
+  },
+  {
+    "errorCode": 953,
+    "description": "Labor subcategory must be set",
+    "errorMessage": "Missing labor subcategory"
+  },
+  {
+    "errorCode": 954,
+    "description": "An existing Project billing rule must be specified",
+    "errorMessage": "Invalid Project billing rule ID specified"
+  },
+  {
+    "errorCode": 960,
+    "description": "Allowed types: CV, AVATAR",
+    "errorMessage": "Invalid Resource attachment type"
+  },
+  {
+    "errorCode": 961,
+    "description": "Each user can have only one resource attachment of given type",
+    "errorMessage": "Duplicate entry for user"
+  },
+  {
+    "errorCode": 962,
+    "description": "This ResourceAttachment cannot be edited",
+    "errorMessage": "ResourceAttachment cannot by modified"
+  },
+  {
+    "errorCode": 963,
+    "description": "This attachment id does not exist or it does not have association/record for given user.",
+    "errorMessage": "Invalid attachment id"
+  },
+  {
+    "errorCode": 964,
+    "description": "This ResourceAttachment id does not exist",
+    "errorMessage": "Invalid ResourceAttachment id"
+  },
+  {
+    "errorCode": 965,
+    "description": "The attachment record was created but marked as deleted. Try adding the attachment again and if the error persists, contact SuiteProjects Pro Customer Support.",
+    "errorMessage": "File could not be saved"
+  },
+  {
+    "errorCode": 1001,
+    "description": "Record could not be submitted, because it is currently not Open or Rejected",
+    "errorMessage": "Invalid state"
+  },
+  {
+    "errorCode": 1002,
+    "description": "There are errors associated with this request",
+    "errorMessage": "Submit/Approve/Reject error"
+  },
+  {
+    "errorCode": 1003,
+    "description": "There are warnings associated with this request",
+    "errorMessage": "Submit/Approve/Reject warning"
+  },
+  {
+    "errorCode": 1050,
+    "description": "Please specify a valid hierarchy node",
+    "errorMessage": "Invalid hierarchy node specified"
+  },
+  {
+    "errorCode": 1051,
+    "description": "Please specify a different hierarchy node",
+    "errorMessage": "You cannot assign multiple nodes within one hierarchy"
+  },
+  {
+    "errorCode": 1100,
+    "description": "Please specify either empty string or 1",
+    "errorMessage": "Invalid value specified for a checkbox custom field"
+  },
+  {
+    "errorCode": 1101,
+    "description": "Please specify one of the valid values for this custom field",
+    "errorMessage": "Value specified is not on the list of values for this custom field"
+  },
+  {
+    "errorCode": 1102,
+    "description": "Please check specific error descriptions.",
+    "errorMessage": "Custom field could not be saved"
+  },
+  {
+    "errorCode": 1103,
+    "description": "Only valuelist field can be modified at this time",
+    "errorMessage": "Modification of the field specified is not supported"
+  },
+  {
+    "errorCode": 1104,
+    "description": "You must enter a unique value",
+    "errorMessage": "This custom field value is not unique"
+  },
+  {
+    "errorCode": 1105,
+    "description": "Please specify one of the valid values from the source pick list for this custom field",
+    "errorMessage": "Value specified is not on the list of values in the source pick list defined for this custom field"
+  },
+  {
+    "errorCode": 1106,
+    "description": "Please review specific errors returned",
+    "errorMessage": "One or more custom fields failed to be updated"
+  },
+  {
+    "errorCode": 1200,
+    "description": "Command wasn't executed because condition wasn't met. Returning the record from DB",
+    "errorMessage": "Condition not met"
+  },
+  {
+    "errorCode": 1300,
+    "description": "Please specify a valid filtert set",
+    "errorMessage": "Invalid filter set specified"
+  },
+  {
+    "errorCode": 1400,
+    "description": "Please specify a valid start_end_month_ts flag for the Timesheet",
+    "errorMessage": "Missing start_end_month_ts flag"
+  },
+  {
+    "errorCode": 1401,
+    "description": "Specified associated_tmid is invalid, please consult documentation",
+    "errorMessage": "Invalid associated_tmid"
+  },
+  {
+    "errorCode": 1402,
+    "description": "You cannot specify associated_tmid nor start_end_month_ts flag for non-overlapping timesheets",
+    "errorMessage": "Non-overlapping timesheet"
+  },
+  {
+    "errorCode": 1403,
+    "description": "You cannot modify specific field of associated timesheets, please consult documentation",
+    "errorMessage": "Cannot modify timesheet with associated_tmid"
+  },
+  {
+    "errorCode": 1404,
+    "description": "Time must be a valid value",
+    "errorMessage": "Invalid time"
+  },
+  {
+    "errorCode": 1405,
+    "description": "Start time must be before end time",
+    "errorMessage": "Illegal time range"
+  },
+  {
+    "errorCode": 1406,
+    "description": "Account does not have allowed feature to edit start/end time data",
+    "errorMessage": "No permission to edit time data"
+  },
+  {
+    "errorCode": 1407,
+    "description": "The hours do not match the start and end time",
+    "errorMessage": "Invalid hours"
+  },
+  {
+    "errorCode": 1408,
+    "description": "The newsfeed with specified id does not exist",
+    "errorMessage": "Invalid newsfeed"
+  },
+  {
+    "errorCode": 1409,
+    "description": "The newsfeed message requires author or editor to be set.",
+    "errorMessage": "Both author or editor not set"
+  },
+  {
+    "errorCode": 1410,
+    "description": "The user is set as an integration netsuite user, therefore it is not possible to deactivate him.",
+    "errorMessage": "Deactivate ns integration user"
+  },
+  {
+    "errorCode": 1411,
+    "description": "The user is set as an integration netsuite user, therefore it is not possible to change its administrator role.",
+    "errorMessage": "Change admin role of ns integration user"
+  },
+  {
+    "errorCode": 1412,
+    "description": "Quantity must be non-zero number",
+    "errorMessage": "Invalid quantity"
+  },
+  {
+    "errorCode": 1413,
+    "description": "Payment terms id must correspond with used terms.",
+    "errorMessage": "Invalid payment terms"
+  },
+  {
+    "errorCode": 1414,
+    "description": "Approval status have to be valid.",
+    "errorMessage": "Invalid approval status"
+  },
+  {
+    "errorCode": 1415,
+    "description": "Phase cannot have project task assignments.",
+    "errorMessage": "Phase cannot be assigned"
+  },
+  {
+    "errorCode": 1416,
+    "description": "The cap by customer PO is not valid.",
+    "errorMessage": "Invalid cap by customer PO"
+  },
+  {
+    "errorCode": 1417,
+    "description": "The project task id is not valid.",
+    "errorMessage": "Invalid project task id"
+  },
+  {
+    "errorCode": 1418,
+    "description": "The preference settings format is not valid.",
+    "errorMessage": "Invalid preference settings format"
+  },
+  {
+    "errorCode": 1419,
+    "description": "User cannot be granted access to modules other than Account, Expenses and Timesheets.",
+    "errorMessage": "No full user licenses available"
+  },
+  {
+    "errorCode": 1420,
+    "description": "Cannot add T&E user or mark T&E user as active.",
+    "errorMessage": "No T&E or full user licenses available"
+  },
+  {
+    "errorCode": 1421,
+    "description": "Cannot add guest user or mark guest user as active.",
+    "errorMessage": "No guest or full user licenses available"
+  },
+  {
+    "errorCode": 1422,
+    "description": "Missing Address object.",
+    "errorMessage": "Missing Address object"
+  },
+  {
+    "errorCode": 1423,
+    "description": "The newsfeed can't be modified",
+    "errorMessage": "Can't modify newsfeed"
+  },
+  {
+    "errorCode": 1424,
+    "description": "The newsfeed message does not exist",
+    "errorMessage": "Message does not exist"
+  },
+  {
+    "errorCode": 1425,
+    "description": "The newsfeed message requires editor to be set.",
+    "errorMessage": "Editor not set"
+  },
+  {
+    "errorCode": 1426,
+    "description": "Add command failed.",
+    "errorMessage": "Add failed"
+  },
+  {
+    "errorCode": 1427,
+    "description": "Modify command failed.",
+    "errorMessage": "Modify failed"
+  },
+  {
+    "errorCode": 1428,
+    "description": "The newsfeed is not assigned to any entity.",
+    "errorMessage": "Newsfeed not assigned to any entity"
+  },
+  {
+    "errorCode": 1430,
+    "description": "User cannot be activated due to license restrictions.",
+    "errorMessage": "Cannot activate user"
+  },
+  {
+    "errorCode": 1500,
+    "description": "",
+    "errorMessage": "Access to the Expenses module denied. Please contact your administrator."
+  },
+  {
+    "errorCode": 2001,
+    "description": "Please make sure to pass valid arguments",
+    "errorMessage": "Invalid argument passed"
+  },
+  {
+    "errorCode": 2002,
+    "description": "Please make sure to pass valid format",
+    "errorMessage": "Invalid format passed"
+  }
+]

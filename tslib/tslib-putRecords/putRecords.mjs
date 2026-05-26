@@ -130,7 +130,10 @@ async function buildUpsertXml(criteria, logs) {
 
 export const handler = async (event) => {
   const logs = [];
-  const parser = new XMLParser();
+  const parser = new XMLParser({
+    ignoreAttributes: false, // enable attribute parsing
+    attributeNamePrefix: "@_", // prefix to distinguish attributes from elements
+  });
 
   try {
     logs.push(`event: ${JSON.stringify(event)}`);

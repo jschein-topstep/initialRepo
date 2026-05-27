@@ -232,6 +232,7 @@ async function createSpreadsheet(taskData) {
  */
 
 export const handler = async (event) => {
+  console.log(`Event: ${JSON.stringify(event)}`);
   let bodyText = "no action set";
   if (event.action === "send") {
     const usersToProcess = await getUsers();

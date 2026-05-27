@@ -98,7 +98,7 @@ async function getTasks(userid) {
 
   const taskRecords = assignmentRecords?.length
     ? await Promise.all(
-        assignmentRecords.map(async (assignment) => {
+        assignmentRecords.filter(Boolean).map(async (assignment) => {
           const sppTaskRequest = {
             authObj: authObj,
             recordType: "Projecttask",
@@ -107,7 +107,7 @@ async function getTasks(userid) {
             },
             limit: 1,
             fields: "id,projectid,customerid,name",
-            lookups: [
+            /*lookups: [
               {
                 inTable: "Customer",
                 returnField: "name",
@@ -118,7 +118,7 @@ async function getTasks(userid) {
                 returnField: "name",
                 idFieldInData: "projectid",
               },
-            ],
+            ],*/
           };
 
           const taskRecord = await callSharedUtil(

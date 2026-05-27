@@ -190,12 +190,13 @@ export const handler = async (event) => {
 
     //logs.push(`SPP response: ${responseText}`);
     const sppResponseXML = parser.parse(responseText);
-    const responseObject = Array.isArray(
+    const reponseObject = sppResponseXML.response.Read[event.recordType];
+    /*const responseObject = Array.isArray(
       sppResponseXML.response.Read[event.recordType],
     )
       ? sppResponseXML.response.Read[event.recordType]
       : [sppResponseXML.response.Read[event.recordType]];
-
+*/
     const endResult = event.lookups
       ? await addLookups(event, responseObject, logs)
       : responseObject;
@@ -227,7 +228,7 @@ async function test() {
       id: 6,
     },
     limit: 1,
-    lookups: [
+    lookupss: [
       {
         inTable: "Customer",
         returnField: "name",

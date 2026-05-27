@@ -87,7 +87,7 @@ async function getTasks(userid) {
       closed_for_timesheet: 0,
       userid: userid,
     },
-    limit: 10,
+    limit: "1000,10",
     fields: "projecttaskid",
   };
 
@@ -133,6 +133,19 @@ async function getTasks(userid) {
 
   return taskRecords;
 }
+
+/*
+ *  set timesheet start date
+ */
+
+function getPreviousSunday() {
+  const today = new Date();
+  const dayOfWeek = today.getDay(); // 0 = Sunday
+  const daysToSubtract = dayOfWeek === 0 ? 0 : dayOfWeek;
+  today.setDate(today.getDate() - daysToSubtract);
+  return today.toISOString().substring(0, 10);
+}
+
 /*
  * create initial Excel doc
  */
@@ -140,6 +153,9 @@ async function getTasks(userid) {
 async function createSpreadsheet(taskData) {
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet("Timesheet");
+  const user = { id: 37 };
+  const someToken = "oip24l2wiw";
+  const submitUrl = `https://your-function-url.lambda-url.us-east-2.on.aws/?userId=${user.id}&token=${someToken}`;
 
   // Define columns
   sheet.columns = [
@@ -155,16 +171,58 @@ async function createSpreadsheet(taskData) {
     { header: "TaskId", key: "taskid", width: 10, hidden: true },
   ];
 
+  const linkCell = sheet.getRow(1).getCell(10);
+
+  linkCell.value = {
+    text: "Click here to submit your timesheet",
+    hyperlink: submitUrl,
+  };
+
+  linkCell.font = {
+    bold: true,
+    size: 14,
+    color: { argb: "FF0000FF" }, // blue, optional
+    underline: true, // makes it look more like a link, optional
+  };
+
+  ["A1", "B1", "C1", "D1", "E1", "F1"].forEach((cellRef) => {
+    sheet.getCell(cellRef).font = {
+      bold: true,
+      underline: true,
+    };
+  });
+
   // Add your data rows
-  for (const dataRow of taskData) {
-    sheet.addRow({
-      customer: dataRow.customer_name,
-      project: dataRow.project_name,
-      task: dataRow.name,
-      customerid: dataRow.customerid,
-      projectid: dataRow.projectid,
-      taskid: dataRow.id,
-    });
+  const currentDate = new Date(getPreviousSunday());
+  for (let i = 0; i < 7; i++) {
+    let custName = "";
+    let projName = "";
+
+    for (const [index, dataRow] of taskData.entries()) {
+      switch (index) {
+        case 0:
+        case 1:
+        case 2:
+          custName = "Exemplary Labs";
+          projName = "Implementation Project";
+          break;
+        default:
+          custName = "Stellent";
+          projName = "Jira integration";
+          break;
+      }
+      sheet.addRow({
+        customer: dataRow.customer_name || custName,
+        project: dataRow.project_name || projName,
+        task: dataRow.name,
+        customerid: dataRow.customerid,
+        projectid: dataRow.projectid,
+        taskid: dataRow.id,
+        date: currentDate.toISOString().substring(0, 10),
+      });
+    }
+    sheet.addRow();
+    currentDate.setDate(currentDate.getDate() + 1);
   }
 
   return workbook;
@@ -174,24 +232,38 @@ async function createSpreadsheet(taskData) {
  */
 
 export const handler = async (event) => {
-  const usersToProcess = await getUsers();
-  for (const user of usersToProcess) {
-    const email = user.addr.Address.email;
-    const userTasks = await getTasks(user.id);
-    const timesheet = await createSpreadsheet(userTasks);
+  let bodyText = "no action set";
+  if (event.action === "send") {
+    const usersToProcess = await getUsers();
+    for (const user of usersToProcess) {
+      const email = user.addr.Address.email;
+      const userTasks = await getTasks(user.id);
+      const timesheet = await createSpreadsheet(userTasks);
 
-    const outputBuffer = await timesheet.xlsx.writeBuffer();
+      const outputBuffer = await timesheet.xlsx.writeBuffer();
 
-    await sendTimesheetEmail({
-      toAddress: "jim@addolution.com",
-      attachmentBuffer: outputBuffer,
-      fileName: `timesheet.xlsx`,
-    });
+      await sendTimesheetEmail({
+        toAddress: "jim@addolution.com",
+        attachmentBuffer: outputBuffer,
+        fileName: `timesheet.xlsx`,
+      });
+    }
+    bodyText = "send executed";
+  } else if (event.action === "receive") {
+    bodyText = `
+        <html>
+            <body style="font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0;">
+                <div style="text-align: center;">
+                    <h1 style="color: green;">✓ Timesheet Submitted</h1>
+                    <p>Your timesheet has been successfully submitted. You may close this window.</p>
+                </div>
+            </body>
+        </html>
+    `;
   }
-
   const response = {
     statusCode: 200,
-    body: JSON.stringify("Hello from Lambda!"),
+    body: bodyText,
   };
   return response;
 };
@@ -201,7 +273,7 @@ export const handler = async (event) => {
  */
 
 async function test() {
-  const result = await handler({});
+  const result = await handler({ action: "receive" });
   console.log(JSON.stringify(result, null, 2));
 }
 

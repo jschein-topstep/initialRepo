@@ -190,7 +190,7 @@ export const handler = async (event) => {
 
     //logs.push(`SPP response: ${responseText}`);
     const sppResponseXML = parser.parse(responseText);
-    const reponseObject = sppResponseXML.response.Read[event.recordType];
+    const responseObject = sppResponseXML.response.Read[event.recordType];
     /*const responseObject = Array.isArray(
       sppResponseXML.response.Read[event.recordType],
     )

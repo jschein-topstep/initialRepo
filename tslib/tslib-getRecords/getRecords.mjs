@@ -103,10 +103,15 @@ async function addLookups(event, origData, logs) {
           },
           limit: 1,
         };
-        const lookupRecord = await callSharedUtil(
-          "tslib-getRecords",
-          sppLookupRequest,
-        );
+        try {
+          const lookupRecord = await callSharedUtil(
+            "tslib-getRecords",
+            sppLookupRequest,
+          );
+        } catch (err) {
+          logs.push(`Full error: ${JSON.stringify(err)}`);
+          console.error(err);
+        }
         await sleep(1000);
         if (lookupRecord?.id) {
           //logs.push(`Lookup ID: ${lookupRecord.id}`);

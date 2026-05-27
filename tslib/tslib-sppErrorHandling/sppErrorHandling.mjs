@@ -6,19 +6,22 @@ import {
 import { marshall, unmarshall } from "@aws-sdk/util-dynamodb";
 
 const dynamo = new DynamoDBClient({
-  region: process.env.AWS_REGION || "us-east-1",
+  region: process.env.AWS_REGION || "us-east-2",
 });
 
-export async function getError(errorCode) {
+export const handler = async (event) => {
+  const bodyJSON = JSON.parse(event.errorCode);
+  const errCode = bodyJSON;
   const res = await dynamo.send(
     new GetItemCommand({
-      TableName: sppErrorCodes,
-      Key: marshall({ pk: errorCode }),
+      TableName: "sppErrorCodes",
+      Key: marshall({ errorCode: errCode }),
     }),
   );
 
   if (!res.Item) {
-    throw new Error(`No error found for spp err code: ${errorCode}`);
+    throw new Error(`No error found for spp err code: ${event}`);
   }
+  console.log(`ErrorItem: ${JSON.stringify(res.Item)}`);
   return unmarshall(res.Item);
-}
+};

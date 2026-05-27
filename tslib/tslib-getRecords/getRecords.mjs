@@ -72,6 +72,61 @@ async function buildReadXml(xmlCriteria, logs) {
       </request>`;
 }
 
+async function addLookups(event, origData, logs) {
+  const valueStore = [];
+  const lookups = event.lookups;
+
+  for (const dataRow of origData) {
+    for (const lookupObj of lookups) {
+      const idFieldInData = lookupObj.idField;
+      const returnField = lookupObj.returnField;
+      const inTable = lookupObj.inTable;
+
+      let returnedValue;
+      const foundStoredObject = valueStore.find(
+        (storedObject) =>
+          storedObject.inTable == inTable &&
+          storedObject.returnField == returnField &&
+          storedObject.idFieldInData == idFieldInData &&
+          storedObject.idValue == dataRow[idFieldInData],
+      );
+
+      if (foundStoredObject) {
+        dataRow[`${inTable}.${returnField}`] = foundStoredObject.returnedValue;
+      } else {
+        const sppLookupRequest = {
+          authObj: event.authObj,
+          recordType: inTable,
+          criteriaObj: {
+            id: dataRow[`${idFieldInData}`],
+          },
+          limit: 1,
+        };
+        const lookupRecord = await callSharedUtil(
+          "tslib-getRecords",
+          sppLookupRequest,
+        );
+
+        if (lookupRecord?.id) {
+          //logs.push(`Lookup ID: ${lookupRecord.id}`);
+          dataRow[`${inTable}_${returnField}`] = lookupRecord[`${returnField}`];
+          valueStore.push({
+            inTable: inTable,
+            returnField: returnField,
+            idFieldInData: idFieldInData,
+            returnedValue: lookupRecord[`${returnField}`],
+            idValue: dataRow[idFieldInData],
+          });
+        } else {
+          logs.push(`Nothing returned for lookup request`);
+        }
+      }
+    }
+  }
+
+  return origData;
+}
+
 export const handler = async (event) => {
   const logs = [];
   const parser = new XMLParser();
@@ -129,12 +184,19 @@ export const handler = async (event) => {
 
     //logs.push(`SPP response: ${responseText}`);
     const sppResponseXML = parser.parse(responseText);
-    //logs.push(`ID: ${sppResponseXML.response.Read[event.recordType].id}`);
+    const responseObject = Array.isArray(
+      sppResponseXML.response.Read[event.recordType],
+    )
+      ? sppResponseXML.response.Read[event.recordType]
+      : [sppResponseXML.response.Read[event.recordType]];
 
+    const endResult = event.lookups
+      ? await addLookups(event, responseObject, logs)
+      : responseObject;
     return {
       statusCode: 200,
       logs,
-      body: sppResponseXML.response.Read[event.recordType],
+      body: endResult,
     };
   } catch (err) {
     logs.push(`ERROR: ${err.message}`);
@@ -154,11 +216,23 @@ async function test() {
       company: "Tempus Sandbox",
       instance: "sandbox",
     },
-    recordType: "Project",
+    recordType: "Projecttask",
     criteriaObj: {
-      id: 4,
+      id: 6,
     },
     limit: 1,
+    lookups: [
+      {
+        inTable: "Customer",
+        returnField: "name",
+        idFieldInData: "customerid",
+      },
+      {
+        inTable: "Project",
+        returnField: "name",
+        idFieldInData: "projectid",
+      },
+    ],
   });
   console.log(JSON.stringify(result, null, 2));
 }

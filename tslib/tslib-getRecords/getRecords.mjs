@@ -12,6 +12,7 @@ const oauthPath = process.env.AWS_LAMBDA_FUNCTION_NAME
 const { getValidAccessToken } = await import(oauthPath);
 
 const ssm = new SSMClient({});
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function buildReadXml(xmlCriteria, logs) {
   const sbResponse = await ssm.send(
@@ -106,7 +107,7 @@ async function addLookups(event, origData, logs) {
           "tslib-getRecords",
           sppLookupRequest,
         );
-
+        await sleep(1000);
         if (lookupRecord?.id) {
           //logs.push(`Lookup ID: ${lookupRecord.id}`);
           dataRow[`${inTable}_${returnField}`] = lookupRecord[`${returnField}`];

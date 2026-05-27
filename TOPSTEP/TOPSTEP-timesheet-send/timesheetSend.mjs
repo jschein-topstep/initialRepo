@@ -12,6 +12,8 @@ const authObj = {
   instance: "sb",
 };
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /*
  * email function
  */

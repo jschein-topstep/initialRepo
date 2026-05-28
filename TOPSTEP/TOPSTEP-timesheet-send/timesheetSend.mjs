@@ -232,8 +232,9 @@ function escapeXml(str) {
 
 export const handler = async (event) => {
   console.log(`Event: ${JSON.stringify(event)}`);
+  const eventBody = JSON.parse(event.body);
   let bodyText = "no action set";
-  if (event.action === "send") {
+  if (eventBody.action === "send") {
     const sppAttachmentRequest = {
       authObj: authObj,
       recordType: "Attachment",
@@ -264,7 +265,7 @@ export const handler = async (event) => {
       });
     }
     bodyText = "send executed";
-  } else if (event.action === "receive") {
+  } else if (eventBody.action === "receive") {
     bodyText = `
         <html>
             <body style="font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0;">
@@ -275,8 +276,33 @@ export const handler = async (event) => {
             </body>
         </html>
     `;
-    console.log("Timehseet info received");
+
+    const writeObjArray = [];
+    for (const row of eventBody.rows) {
+      const newWriteObj = {
+        customerid: row.customerId,
+        projectid: row.projectId,
+        projecttaskid: row.taskId,
+        decimal_hours: row.hours,
+        notes: row.notes,
+        userid: 36,
+        date: row.date,
+      };
+      writeObjArray.push(newWriteObj);
+    }
+
+    const timeEntryWriteRequest = {
+      authObj: authObj,
+      recordType: "Task",
+      writeObj: writeObjArray,
+    };
+
+    const timeEntryWriteResponse = await callSharedUtil(
+      "tslib-putRecords",
+      timeEntryWriteRequest,
+    );
   }
+
   const response = {
     statusCode: 200,
     body: bodyText,
@@ -289,7 +315,54 @@ export const handler = async (event) => {
  */
 
 async function test() {
-  const result = await handler({ action: "send" });
+  const passedEvent = {
+    version: "2.0",
+    routeKey: "$default",
+    rawPath: "/",
+    rawQueryString: "",
+    headers: {
+      "content-length": "259",
+      "x-amzn-tls-version": "TLSv1.3",
+      "x-forwarded-proto": "https",
+      "accept-language": "en-us",
+      "x-forwarded-port": "443",
+      "x-forwarded-for": "136.32.176.156",
+      accept: "*/*",
+      "x-amzn-tls-cipher-suite": "TLS_AES_128_GCM_SHA256",
+      "x-amzn-trace-id": "Root=1-6a1865ee-2635f65676ca175309adbdf2",
+      "ua-cpu": "AMD64",
+      host: "eseisyd2naugpsnb7qntwnoyuq0monkf.lambda-url.us-east-2.on.aws",
+      "content-type": "application/json",
+      "cache-control": "no-cache",
+      "accept-encoding": "gzip, deflate",
+      "user-agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; Trident/7.0; rv:11.0) like Gecko",
+    },
+    requestContext: {
+      accountId: "anonymous",
+      apiId: "eseisyd2naugpsnb7qntwnoyuq0monkf",
+      domainName:
+        "eseisyd2naugpsnb7qntwnoyuq0monkf.lambda-url.us-east-2.on.aws",
+      domainPrefix: "eseisyd2naugpsnb7qntwnoyuq0monkf",
+      http: {
+        method: "POST",
+        path: "/",
+        protocol: "HTTP/1.1",
+        sourceIp: "136.32.176.156",
+        userAgent:
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64; Trident/7.0; rv:11.0) like Gecko",
+      },
+      requestId: "004d9de6-654f-4f27-9845-a880d02a767b",
+      routeKey: "$default",
+      stage: "$default",
+      time: "28/May/2026:15:57:34 +0000",
+      timeEpoch: 1779983854652,
+    },
+    body: '{"action":"receive","userId":"37","rows":[{"date":"2026-05-28","customerId":"1090","projectId":"1480","taskId":"10424","hours":3,"notes":"because"},{"date":"2026-05-29","customerId":"3093","projectId":"2062","taskId":"15097","hours":4,"notes":"these notes"}]}',
+    isBase64Encoded: false,
+  };
+
+  const result = await handler(passedEvent);
   console.log(JSON.stringify(result, null, 2));
 }
 

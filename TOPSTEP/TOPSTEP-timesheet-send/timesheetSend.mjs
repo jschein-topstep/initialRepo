@@ -1,4 +1,5 @@
 import ExcelJS from "exceljs";
+import JSZip from "jszip";
 import { SESClient, SendRawEmailCommand } from "@aws-sdk/client-ses";
 
 const sesClient = new SESClient({ region: "us-east-2" });
@@ -150,59 +151,24 @@ function getPreviousSunday() {
  * create initial Excel doc
  */
 
-async function createSpreadsheet(taskData) {
-  const workbook = new ExcelJS.Workbook();
-  const sheet = workbook.addWorksheet("Timesheet");
-  const user = { id: 37 };
+async function createSpreadsheet(taskData, template) {
+  const buffer = Buffer.from(template, "base64");
+  const zip = await JSZip.loadAsync(buffer);
+  //const sheetXml = await zip.file("xl/worksheets/sheet1.xml").async("string");
+
+  const userId = 37;
   const someToken = "oip24l2wiw";
-  const submitUrl = `https://your-function-url.lambda-url.us-east-2.on.aws/?userId=${user.id}&token=${someToken}`;
+  const submitUrl = `https://your-function-url.lambda-url.us-east-2.on.aws/?userId=${userId}&token=${someToken}`;
 
-  // Define columns
-  sheet.columns = [
-    { header: "Customer", key: "customer", width: 30 },
-    { header: "Project", key: "project", width: 30 },
-    { header: "Task", key: "task", width: 30 },
-    { header: "Date", key: "date", width: 15 },
-    { header: "Hours", key: "hours", width: 10 },
-    { header: "Notes", key: "notes", width: 40 },
-    // hidden SPP ID columns
-    { header: "CustomerId", key: "customerid", width: 10, hidden: true },
-    { header: "ProjectId", key: "projectid", width: 10, hidden: true },
-    { header: "TaskId", key: "taskid", width: 10, hidden: true },
-  ];
-
-  const linkCell = sheet.getRow(1).getCell(10);
-
-  linkCell.value = {
-    text: "Click here to submit your timesheet",
-    hyperlink: submitUrl,
-  };
-
-  linkCell.font = {
-    bold: true,
-    size: 14,
-    color: { argb: "FF0000FF" }, // blue, optional
-    underline: true, // makes it look more like a link, optional
-  };
-
-  ["A1", "B1", "C1", "D1", "E1", "F1"].forEach((cellRef) => {
-    sheet.getCell(cellRef).font = {
-      bold: true,
-      underline: true,
-    };
-  });
-
-  // Add your data rows
-  const currentDate = new Date(getPreviousSunday());
-  for (let i = 0; i < 7; i++) {
-    let custName = "";
-    let projName = "";
-
-    for (const [index, dataRow] of taskData.entries()) {
-      switch (index) {
-        case 0:
-        case 1:
+  let custName = "";
+  let projName = "";
+  const dataRows = taskData
+    .map((row, index) => {
+      const rowNum = index + 5; // start at row 2 (row 1 = headers)
+      switch (rowNum) {
         case 2:
+        case 3:
+        case 4:
           custName = "Exemplary Labs";
           projName = "Implementation Project";
           break;
@@ -211,22 +177,55 @@ async function createSpreadsheet(taskData) {
           projName = "Jira integration";
           break;
       }
-      sheet.addRow({
-        customer: dataRow.customer_name || custName,
-        project: dataRow.project_name || projName,
-        task: dataRow.name,
-        customerid: dataRow.customerid,
-        projectid: dataRow.projectid,
-        taskid: dataRow.id,
-        date: currentDate.toISOString().substring(0, 10),
-      });
-    }
-    sheet.addRow();
-    currentDate.setDate(currentDate.getDate() + 1);
+      return `
+        <row r="${rowNum}">
+            <c r="A${rowNum}" t="str"><v>${escapeXml(custName)}</v></c>
+            <c r="B${rowNum}" t="str"><v>${escapeXml(projName)}</v></c>
+            <c r="C${rowNum}" t="str"><v>${escapeXml(row.name)}</v></c>
+            <c r="D${rowNum}"><v></v></c>
+            <c r="E${rowNum}"><v></v></c>
+            <c r="F${rowNum}" t="str"><v></v></c>
+            <c r="G${rowNum}" t="str"><v>${row.customerId}</v></c>
+            <c r="H${rowNum}" t="str"><v>${row.projectId}</v></c>
+            <c r="I${rowNum}" t="str"><v>${row.id}</v></c>
+            <c r="J${rowNum}" t="str"><v>${userId}</v></c>
+        </row>`;
+    })
+    .join("");
+
+  for (let i = 2; i <= 8; i++) {
+    const sheetXml = await zip
+      .file(`xl/worksheets/sheet${i}.xml`)
+      .async("string");
+
+    const existingRowsMatch = sheetXml.match(
+      /<sheetData>([\s\S]*?)<\/sheetData>/,
+    );
+    const existingRows = existingRowsMatch ? existingRowsMatch[1] : "";
+
+    const updatedXml = sheetXml.replace(
+      /<sheetData\s*\/>|<sheetData>[\s\S]*?<\/sheetData>/,
+      `<sheetData>${existingRows}${dataRows}</sheetData>`,
+    );
+
+    zip.file(`xl/worksheets/sheet${i}.xml`, updatedXml);
   }
 
-  return workbook;
+  // Generate output buffer
+  const outputBuffer = await zip.generateAsync({ type: "nodebuffer" });
+  return outputBuffer;
 }
+
+function escapeXml(str) {
+  if (!str) return "";
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
 /*
  * main handler
  */
@@ -235,18 +234,33 @@ export const handler = async (event) => {
   console.log(`Event: ${JSON.stringify(event)}`);
   let bodyText = "no action set";
   if (event.action === "send") {
+    const sppAttachmentRequest = {
+      authObj: authObj,
+      recordType: "Attachment",
+      criteriaObj: {
+        id: 17447,
+      },
+      limit: 1,
+    };
+
+    const template = await callSharedUtil(
+      "tslib-getRecords",
+      sppAttachmentRequest,
+    );
+
     const usersToProcess = await getUsers();
     for (const user of usersToProcess) {
       const email = user.addr.Address.email;
       const userTasks = await getTasks(user.id);
-      const timesheet = await createSpreadsheet(userTasks);
-
-      const outputBuffer = await timesheet.xlsx.writeBuffer();
+      const outputBuffer = await createSpreadsheet(
+        userTasks,
+        template.base64_data,
+      );
 
       await sendTimesheetEmail({
         toAddress: "jim@addolution.com",
         attachmentBuffer: outputBuffer,
-        fileName: `timesheet.xlsx`,
+        fileName: `timesheet.xlsm`,
       });
     }
     bodyText = "send executed";
@@ -274,7 +288,7 @@ export const handler = async (event) => {
  */
 
 async function test() {
-  const result = await handler({ action: "receive" });
+  const result = await handler({ action: "send" });
   console.log(JSON.stringify(result, null, 2));
 }
 

@@ -98,7 +98,17 @@ async function buildUpsertXml(criteria, logs) {
           }
         } else {
           if (key === "date") {
-            const d = new Date(writeObj[key]);
+            let d;
+            if (/^\d{4}-\d{2}-\d{2}$/.test(writeObj[key])) {
+              var parts = writeObj[key].split("-");
+              d = new Date(
+                parseInt(parts[0], 10), // year
+                parseInt(parts[1], 10) - 1, // month (0-based)
+                parseInt(parts[2], 10), // day
+              );
+            } else {
+              const d = new Date(writeObj[key]);
+            }
             const pad = (num) => {
               return num.toString().padStart(2, "0");
             };

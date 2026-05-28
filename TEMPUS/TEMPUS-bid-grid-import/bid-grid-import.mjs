@@ -106,7 +106,7 @@ export const handler = async (event) => {
     proj_project_gm_percent__c: 0,
     proj_total_hours__c: 0,
   };
-
+  // check for initial load complete box checked -- projectRecord.fieldName. If checked then update, otherwise proceed normally
   const phaseObjArray = [];
   const taskObjArray = [];
   const assignmentObjArray = [];
@@ -236,6 +236,7 @@ export const handler = async (event) => {
   projectCalculations.proj_project_gm_percent__c =
     projectCalculations.proj_project_gm__c /
     projectCalculations.proj_contract_value__c;
+  projectCalculations.initialLoadCompleted__c = 1;
 
   const projectUpdateDetails = {
     authObj: authObj,

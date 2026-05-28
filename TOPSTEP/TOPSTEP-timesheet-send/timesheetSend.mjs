@@ -97,40 +97,42 @@ async function getTasks(userid) {
     sppAssignmentRequest,
   );
 
-  const taskRecords = assignmentRecords?.length
-    ? await Promise.all(
-        assignmentRecords.filter(Boolean).map(async (assignment) => {
-          const sppTaskRequest = {
-            authObj: authObj,
-            recordType: "Projecttask",
-            criteriaObj: {
-              id: assignment.projecttaskid,
-            },
-            limit: 1,
-            fields: "id,projectid,customerid,name",
-            /*lookups: [
-              {
-                inTable: "Customer",
-                returnField: "name",
-                idFieldInData: "customerid",
-              },
-              {
-                inTable: "Project",
-                returnField: "name",
-                idFieldInData: "projectid",
-              },
-            ],*/
-          };
+  const taskRecords = [];
+  if (assignmentRecords?.length) {
+    for (const assignment of assignmentRecords.filter(Boolean)) {
+      const sppTaskRequest = {
+        authObj: authObj,
+        recordType: "Projecttask",
+        criteriaObj: {
+          id: assignment.projecttaskid,
+        },
+        limit: 1,
+        fields: "id,projectid,customerid,name",
+        lookups: [
+          {
+            inTable: "Customer",
+            returnField: "name",
+            idFieldInData: "customerid",
+          },
+          {
+            inTable: "Project",
+            returnField: "name",
+            idFieldInData: "projectid",
+          },
+        ],
+      };
 
-          const taskRecord = await callSharedUtil(
-            "tslib-getRecords",
-            sppTaskRequest,
-          );
-
-          return taskRecord;
-        }),
-      )
-    : [];
+      const taskRecord = await callSharedUtil(
+        "tslib-getRecords",
+        sppTaskRequest,
+      );
+      const normalizedRecord = Array.isArray(taskRecord)
+        ? taskRecord[0]
+        : taskRecord;
+      taskRecords.push(normalizedRecord);
+      await sleep(500);
+    }
+  }
 
   return taskRecords;
 }
@@ -147,71 +149,188 @@ function getPreviousSunday() {
   return today.toISOString().substring(0, 10);
 }
 
+function getNextSunday() {
+  const now = new Date();
+  const day = now.getDay(); // 0=Sun
+  const daysUntilSunday = day === 0 ? 7 : 7 - day;
+  const sunday = new Date(now);
+  sunday.setDate(now.getDate() + daysUntilSunday);
+  return sunday;
+}
+
+function formatSheetDate(date) {
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  const yyyy = date.getFullYear();
+  return `${mm}-${dd}-${yyyy}`;
+}
 /*
  * create initial Excel doc
  */
 
-async function createSpreadsheet(taskData, template) {
+async function createSpreadsheet(taskData, template, userId) {
   const buffer = Buffer.from(template, "base64");
   const zip = await JSZip.loadAsync(buffer);
-  //const sheetXml = await zip.file("xl/worksheets/sheet1.xml").async("string");
+  const contentTypes = await zip.file("[Content_Types].xml").async("string");
+  console.log("Content Types:", contentTypes);
 
-  const userId = 37;
-  const someToken = "oip24l2wiw";
-  const submitUrl = `https://your-function-url.lambda-url.us-east-2.on.aws/?userId=${userId}&token=${someToken}`;
+  const sunday = getNextSunday();
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(sunday);
+    d.setDate(sunday.getDate() + i);
+    return d;
+  });
 
-  let custName = "";
-  let projName = "";
-  const dataRows = taskData
-    .map((row, index) => {
-      const rowNum = index + 5; // start at row 2 (row 1 = headers)
-      switch (rowNum) {
-        case 2:
-        case 3:
-        case 4:
-          custName = "Exemplary Labs";
-          projName = "Implementation Project";
-          break;
-        default:
-          custName = "Stellent";
-          projName = "Jira integration";
-          break;
-      }
-      return `
-        <row r="${rowNum}">
-            <c r="A${rowNum}" t="str"><v>${escapeXml(custName)}</v></c>
-            <c r="B${rowNum}" t="str"><v>${escapeXml(projName)}</v></c>
-            <c r="C${rowNum}" t="str"><v>${escapeXml(row.name)}</v></c>
-            <c r="D${rowNum}"><v></v></c>
-            <c r="E${rowNum}"><v></v></c>
-            <c r="F${rowNum}" t="str"><v></v></c>
-            <c r="G${rowNum}" t="str"><v>${row.customerid}</v></c>
-            <c r="H${rowNum}" t="str"><v>${row.projectid}</v></c>
-            <c r="I${rowNum}" t="str"><v>${row.id}</v></c>
-            <c r="J${rowNum}" t="str"><v>${userId}</v></c>
-        </row>`;
-    })
+  // Build unique customers, projects, tasks
+  const customers = [];
+  const projects = [];
+  const tasks = [];
+  const seenCustomers = new Set();
+  const seenProjects = new Set();
+
+  for (const row of taskData) {
+    row.customerName = row.Customer_name;
+    row.projectName = row.Project_name;
+    if (!seenCustomers.has(row.customerid)) {
+      seenCustomers.add(row.customerid);
+      customers.push({ name: row.customerName, id: row.customerid });
+    }
+    if (!seenProjects.has(row.projectid)) {
+      seenProjects.add(row.projectid);
+      projects.push({
+        name: row.projectName,
+        id: row.projectid,
+        customerId: row.customerid,
+      });
+    }
+    tasks.push({ name: row.name, id: row.id, projectId: row.projectid });
+  }
+
+  // Build Data sheet rows
+  const allRows = new Map();
+
+  const addCell = (rowNum, colLetter, value) => {
+    if (!allRows.has(rowNum)) allRows.set(rowNum, []);
+    allRows
+      .get(rowNum)
+      .push(
+        `<c r="${colLetter}${rowNum}" t="str"><v>${escapeXml(String(value))}</v></c>`,
+      );
+  };
+
+  // Row 1 headers (optional but helpful)
+  addCell(1, "A", "CustomerName");
+  addCell(1, "B", "CustomerId");
+  addCell(1, "D", "ProjectName");
+  addCell(1, "E", "ProjectId");
+  addCell(1, "F", "CustomerIdRef");
+  addCell(1, "H", "TaskName");
+  addCell(1, "I", "TaskId");
+  addCell(1, "J", "ProjectIdRef");
+  addCell(1, "L", "FilteredProjects");
+  addCell(1, "M", "FilteredTasks");
+
+  customers.forEach((c, i) => {
+    const r = i + 2;
+    addCell(r, "A", c.name);
+    addCell(r, "B", c.id);
+  });
+
+  projects.forEach((p, i) => {
+    const r = i + 2;
+    addCell(r, "D", p.name);
+    addCell(r, "E", p.id);
+    addCell(r, "F", p.customerId);
+  });
+
+  tasks.forEach((t, i) => {
+    const r = i + 2;
+    addCell(r, "H", t.name);
+    addCell(r, "I", t.id);
+    addCell(r, "J", t.projectId);
+  });
+
+  // Build Data sheet XML
+  const dataRows = Array.from(allRows.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([r, cells]) => `<row r="${r}">${cells.join("")}</row>`)
     .join("");
 
-  for (let i = 2; i <= 8; i++) {
-    const sheetXml = await zip
-      .file(`xl/worksheets/sheet${i}.xml`)
-      .async("string");
+  const dataSheetXml = await zip
+    .file("xl/worksheets/sheet9.xml")
+    .async("string");
+  const updatedDataXml = dataSheetXml.replace(
+    /<sheetData\s*\/>|<sheetData>[\s\S]*?<\/sheetData>/,
+    `<sheetData>${dataRows}</sheetData>`,
+  );
+  zip.file("xl/worksheets/sheet9.xml", updatedDataXml);
 
+  // Rename sheets 2-8
+  let workbookXml = await zip.file("xl/workbook.xml").async("string");
+  days.forEach((date, i) => {
+    const sheetName = formatSheetDate(date);
+    workbookXml = workbookXml.replace(
+      new RegExp(`name="Sheet${i + 2}"`),
+      `name="${sheetName}"`,
+    );
+  });
+  zip.file("xl/workbook.xml", workbookXml);
+
+  // Update each day sheet with userId and named range validations
+  for (let i = 0; i < 7; i++) {
+    let sheetXml = await zip
+      .file(`xl/worksheets/sheet${i + 2}.xml`)
+      .async("string");
+    sheetXml = sheetXml.replace(/(<dimension ref=")[^"]*(")/, `$1A2:J1000$2`);
+
+    // userId in fixed cell J2
     const existingRowsMatch = sheetXml.match(
       /<sheetData>([\s\S]*?)<\/sheetData>/,
     );
     const existingRows = existingRowsMatch ? existingRowsMatch[1] : "";
+    const userIdRow = `<row r="2"><c r="J2" t="str"><v>${escapeXml(String(userId))}</v></c></row>`;
 
-    const updatedXml = sheetXml.replace(
+    sheetXml = sheetXml.replace(
       /<sheetData\s*\/>|<sheetData>[\s\S]*?<\/sheetData>/,
-      `<sheetData>${existingRows}${dataRows}</sheetData>`,
+      `<sheetData>${userIdRow}${existingRows}</sheetData>`,
     );
 
-    zip.file(`xl/worksheets/sheet${i}.xml`, updatedXml);
+    // Named range validations pointing at Data sheet columns
+    const dataValidation = `<dataValidations count="3">
+    <dataValidation type="list" sqref="A5:A1000" showDropDown="0" showErrorMessage="1" errorTitle="Invalid Selection" error="Please select a customer from the list.">
+        <formula1>Data!$A$2:$A$${customers.length + 1}</formula1>
+    </dataValidation>
+    <dataValidation type="list" sqref="B5:B1000" showDropDown="0" showErrorMessage="1" errorTitle="Invalid Selection" error="Please select a project from the list.">
+        <formula1>Data!$L$2:$L$1000</formula1>
+    </dataValidation>
+    <dataValidation type="list" sqref="C5:C1000" showDropDown="0" showErrorMessage="1" errorTitle="Invalid Selection" error="Please select a task from the list.">
+        <formula1>Data!$M$2:$M$1000</formula1>
+    </dataValidation>
+</dataValidations>`;
+
+    //const dataValidation = `<dataValidations count="1"><dataValidation type="list" sqref="A5:A1000"><formula1>&quot;test&quot;</formula1></dataValidation></dataValidations>`;
+
+    if (!sheetXml.includes("<dataValidations")) {
+      sheetXml = sheetXml.replace(
+        "<pageMargins",
+        `${dataValidation}<pageMargins`,
+      );
+    }
+
+    if (i === 0) {
+      console.log("Sheet2 XML end:", sheetXml.substring(sheetXml.length - 300));
+    }
+    /*
+    if (i === 0) {
+      console.log("Sheet2 XML middle:", sheetXml.substring(500, 1500));
+
+      const hasSheetData =
+        /<sheetData\s*\/>|<sheetData>[\s\S]*?<\/sheetData>/.test(sheetXml);
+      console.log("sheetData found:", hasSheetData);
+    }*/
+    zip.file(`xl/worksheets/sheet${i + 2}.xml`, sheetXml);
   }
 
-  // Generate output buffer
   const outputBuffer = await zip.generateAsync({ type: "nodebuffer" });
   return outputBuffer;
 }
@@ -256,6 +375,7 @@ export const handler = async (event) => {
       const outputBuffer = await createSpreadsheet(
         userTasks,
         template.base64_data,
+        36,
       );
 
       await sendTimesheetEmail({
@@ -280,9 +400,9 @@ export const handler = async (event) => {
     const writeObjArray = [];
     for (const row of eventBody.rows) {
       const newWriteObj = {
-        customerid: row.customerId,
-        projectid: row.projectId,
-        projecttaskid: row.taskId,
+        customerid: row.customerid,
+        projectid: row.projectid,
+        projecttaskid: row.id,
         decimal_hours: row.hours,
         notes: row.notes,
         userid: 36,
@@ -314,7 +434,57 @@ export const handler = async (event) => {
  * test function
  */
 
-async function test() {
+async function testSend() {
+  const passedEvent = {
+    version: "2.0",
+    routeKey: "$default",
+    rawPath: "/",
+    rawQueryString: "",
+    headers: {
+      "content-length": "259",
+      "x-amzn-tls-version": "TLSv1.3",
+      "x-forwarded-proto": "https",
+      "accept-language": "en-us",
+      "x-forwarded-port": "443",
+      "x-forwarded-for": "136.32.176.156",
+      accept: "*/*",
+      "x-amzn-tls-cipher-suite": "TLS_AES_128_GCM_SHA256",
+      "x-amzn-trace-id": "Root=1-6a1865ee-2635f65676ca175309adbdf2",
+      "ua-cpu": "AMD64",
+      host: "eseisyd2naugpsnb7qntwnoyuq0monkf.lambda-url.us-east-2.on.aws",
+      "content-type": "application/json",
+      "cache-control": "no-cache",
+      "accept-encoding": "gzip, deflate",
+      "user-agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; Trident/7.0; rv:11.0) like Gecko",
+    },
+    requestContext: {
+      accountId: "anonymous",
+      apiId: "eseisyd2naugpsnb7qntwnoyuq0monkf",
+      domainName:
+        "eseisyd2naugpsnb7qntwnoyuq0monkf.lambda-url.us-east-2.on.aws",
+      domainPrefix: "eseisyd2naugpsnb7qntwnoyuq0monkf",
+      http: {
+        method: "POST",
+        path: "/",
+        protocol: "HTTP/1.1",
+        sourceIp: "136.32.176.156",
+        userAgent:
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64; Trident/7.0; rv:11.0) like Gecko",
+      },
+      requestId: "004d9de6-654f-4f27-9845-a880d02a767b",
+      routeKey: "$default",
+      stage: "$default",
+      time: "28/May/2026:15:57:34 +0000",
+      timeEpoch: 1779983854652,
+    },
+    body: '{"action":"send"}',
+    isBase64Encoded: false,
+  };
+  const result = await handler(passedEvent);
+  console.log(JSON.stringify(result, null, 2));
+}
+async function testReceive() {
   const passedEvent = {
     version: "2.0",
     routeKey: "$default",
@@ -367,5 +537,5 @@ async function test() {
 }
 
 if (!process.env.AWS_LAMBDA_FUNCTION_NAME) {
-  test();
+  testSend();
 }

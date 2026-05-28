@@ -77,9 +77,11 @@ async function addLookups(event, origData, logs) {
   const valueStore = [];
   const lookups = event.lookups;
 
-  for (const dataRow of origData) {
+  const data = Array.isArray(origData) ? origData : [origData];
+
+  for (const dataRow of data) {
     for (const lookupObj of lookups) {
-      const idFieldInData = lookupObj.idField;
+      const idFieldInData = lookupObj.idFieldInData;
       const returnField = lookupObj.returnField;
       const inTable = lookupObj.inTable;
 
@@ -103,8 +105,9 @@ async function addLookups(event, origData, logs) {
           },
           limit: 1,
         };
+        let lookupRecord;
         try {
-          const lookupRecord = await callSharedUtil(
+          lookupRecord = await callSharedUtil(
             "tslib-getRecords",
             sppLookupRequest,
           );
@@ -130,7 +133,7 @@ async function addLookups(event, origData, logs) {
     }
   }
 
-  return origData;
+  return data;
 }
 
 export const handler = async (event) => {
@@ -228,7 +231,7 @@ async function test() {
       id: 6,
     },
     limit: 1,
-    lookupss: [
+    lookups: [
       {
         inTable: "Customer",
         returnField: "name",

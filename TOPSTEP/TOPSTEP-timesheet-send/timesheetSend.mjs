@@ -185,8 +185,8 @@ async function createSpreadsheet(taskData, template) {
             <c r="D${rowNum}"><v></v></c>
             <c r="E${rowNum}"><v></v></c>
             <c r="F${rowNum}" t="str"><v></v></c>
-            <c r="G${rowNum}" t="str"><v>${row.customerId}</v></c>
-            <c r="H${rowNum}" t="str"><v>${row.projectId}</v></c>
+            <c r="G${rowNum}" t="str"><v>${row.customerid}</v></c>
+            <c r="H${rowNum}" t="str"><v>${row.projectid}</v></c>
             <c r="I${rowNum}" t="str"><v>${row.id}</v></c>
             <c r="J${rowNum}" t="str"><v>${userId}</v></c>
         </row>`;
@@ -275,6 +275,7 @@ export const handler = async (event) => {
             </body>
         </html>
     `;
+    console.log("Timehseet info received");
   }
   const response = {
     statusCode: 200,

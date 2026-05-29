@@ -297,13 +297,13 @@ async function createSpreadsheet(taskData, template, userId) {
 
     // Named range validations pointing at Data sheet columns
     const dataValidation = `<dataValidations count="3">
-    <dataValidation type="list" sqref="A5:A1000" showDropDown="0" showErrorMessage="1" errorTitle="Invalid Selection" error="Please select a customer from the list.">
+    <dataValidation type="list" sqref="A4:A1000" showDropDown="0" showErrorMessage="1" errorTitle="Invalid Selection" error="Please select a customer from the list.">
         <formula1>Data!$A$2:$A$${customers.length + 1}</formula1>
     </dataValidation>
-    <dataValidation type="list" sqref="B5:B1000" showDropDown="0" showErrorMessage="1" errorTitle="Invalid Selection" error="Please select a project from the list.">
+    <dataValidation type="list" sqref="B4:B1000" showDropDown="0" showErrorMessage="1" errorTitle="Invalid Selection" error="Please select a project from the list.">
         <formula1>Data!$L$2:$L$1000</formula1>
     </dataValidation>
-    <dataValidation type="list" sqref="C5:C1000" showDropDown="0" showErrorMessage="1" errorTitle="Invalid Selection" error="Please select a task from the list.">
+    <dataValidation type="list" sqref="C4:C1000" showDropDown="0" showErrorMessage="1" errorTitle="Invalid Selection" error="Please select a task from the list.">
         <formula1>Data!$M$2:$M$1000</formula1>
     </dataValidation>
 </dataValidations>`;
@@ -400,9 +400,9 @@ export const handler = async (event) => {
     const writeObjArray = [];
     for (const row of eventBody.rows) {
       const newWriteObj = {
-        customerid: row.customerid,
-        projectid: row.projectid,
-        projecttaskid: row.id,
+        customerid: row.customerId,
+        projectid: row.projectId,
+        projecttaskid: row.taskId,
         decimal_hours: row.hours,
         notes: row.notes,
         userid: 36,
@@ -528,7 +528,7 @@ async function testReceive() {
       time: "28/May/2026:15:57:34 +0000",
       timeEpoch: 1779983854652,
     },
-    body: '{"action":"receive","userId":"37","rows":[{"date":"2026-05-28","customerId":"1090","projectId":"1480","taskId":"10424","hours":3,"notes":"because"},{"date":"2026-05-29","customerId":"3093","projectId":"2062","taskId":"15097","hours":4,"notes":"these notes"}]}',
+    body: '{"action":"receive","userId":"","rows":[{"date":"2026-05-31","customerId":"1090","projectId":"1480","taskId":"10424","hours":1,"notes":"abc"},{"date":"2026-05-31","customerId":"3150","projectId":"2166","taskId":"15099","hours":2,"notes":"def"}]}',
     isBase64Encoded: false,
   };
 
@@ -537,5 +537,5 @@ async function testReceive() {
 }
 
 if (!process.env.AWS_LAMBDA_FUNCTION_NAME) {
-  testSend();
+  testReceive();
 }

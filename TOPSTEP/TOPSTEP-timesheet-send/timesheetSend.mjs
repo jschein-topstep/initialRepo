@@ -9,8 +9,8 @@ const sharedPath = process.env.AWS_LAMBDA_FUNCTION_NAME
 const { callSharedUtil } = await import(sharedPath);
 
 const authObj = {
-  company: "top step consulting llc",
-  instance: "sb",
+  company: "top step",
+  instance: "prod",
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -72,8 +72,10 @@ async function getUsers() {
   };
 
   const userRecords = await callSharedUtil("tslib-getRecords", sppUserRequest);
-
-  return userRecords;
+  const normalizedRecords = Array.isArray(userRecords)
+    ? userRecords
+    : [userRecords];
+  return normalizedRecords;
 }
 
 /*
@@ -88,7 +90,7 @@ async function getTasks(userid) {
       closed_for_timesheet: 0,
       userid: userid,
     },
-    limit: "1000,10",
+    limit: "1000",
     fields: "projecttaskid",
   };
 
@@ -130,7 +132,7 @@ async function getTasks(userid) {
         ? taskRecord[0]
         : taskRecord;
       taskRecords.push(normalizedRecord);
-      await sleep(500);
+      //await sleep(500);
     }
   }
 
@@ -358,7 +360,7 @@ export const handler = async (event) => {
       authObj: authObj,
       recordType: "Attachment",
       criteriaObj: {
-        id: 17447,
+        id: 18206,
       },
       limit: 1,
     };
@@ -537,5 +539,5 @@ async function testReceive() {
 }
 
 if (!process.env.AWS_LAMBDA_FUNCTION_NAME) {
-  testReceive();
+  testSend();
 }

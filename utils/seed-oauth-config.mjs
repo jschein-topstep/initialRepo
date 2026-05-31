@@ -17,17 +17,17 @@ import { marshall } from "@aws-sdk/util-dynamodb";
 const client = new DynamoDBClient({ region: "us-east-2" });
 
 const config = {
-  pk: "spp-TEMPUS-sb", // integration key — matches oauth_tokens pk
-  client_id: "82929_MbTmsK0rp2jtWuDE",
+  pk: "spp-top step-prod", // integration key — matches oauth_tokens pk
+  client_id: "45210_WlSSxaIrwS88rqB9",
   client_secret:
-    "P_RNg93mlX_irXI_4vNzVNpQqopMuuSaYT1aUTKk0lOL9vtnoBj7bsiHpSDXkAmdR1ON4wIycNt3ZjxbnHm6Lw", // or store SSM param name here instead
+    "dbsLF8rrjYA_IM-IaNhOddbW9QMWeqTwL8SfGKpj4nmI-NL6sv_-z-F2eYNydoJ5Ezd4flXlPYeqpE5iUP6qTA", // or store SSM param name here instead
   redirect_uri:
     "https://q44gc4muxql4xf2iw74ptsvnp40lhwyd.lambda-url.us-east-2.on.aws/", // tslib-exchangeCodeForTokens
-  scope: "xml", // space-separated
+  scope: "xml rest", // space-separated
   authorization_url:
-    "https://4652778-tempus-ai-inc.app.sandbox.netsuitesuiteprojectspro.com/login/oauth2/v1/authorize", // e.g. https://auth.example.com/oauth2/authorize
+    "https://top-step.app.netsuitesuiteprojectspro.com/login/oauth2/v1/authorize", // e.g. https://auth.example.com/oauth2/authorize
   token_url:
-    "https://4652778-tempus-ai-inc.app.sandbox.netsuitesuiteprojectspro.com/login/oauth2/v1/token", // e.g. https://auth.example.com/oauth2/token
+    "https://top-step.app.netsuitesuiteprojectspro.com/login/oauth2/v1/token", // e.g. https://auth.example.com/oauth2/token
   // state is typically generated at runtime, but you can seed a default here
   // state: "some-random-value"
 };

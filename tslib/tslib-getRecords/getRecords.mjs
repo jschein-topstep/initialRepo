@@ -115,7 +115,7 @@ async function addLookups(event, origData, logs) {
           logs.push(`Full error: ${JSON.stringify(err)}`);
           console.error(err);
         }
-        await sleep(1000);
+        await sleep(100);
         if (lookupRecord?.id) {
           //logs.push(`Lookup ID: ${lookupRecord.id}`);
           dataRow[`${inTable}_${returnField}`] = lookupRecord[`${returnField}`];

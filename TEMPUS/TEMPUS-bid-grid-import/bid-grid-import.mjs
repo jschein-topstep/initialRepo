@@ -232,10 +232,15 @@ export const handler = async (event) => {
   );
 
   projectCalculations.proj_direct_gm_percent__c =
-    projectCalculations.proj_direct_gm__c / projectCalculations.proj_directs__c;
+    projectCalculations.proj_directs__c !== 0
+      ? projectCalculations.proj_direct_gm__c /
+        projectCalculations.proj_directs__c
+      : 0;
   projectCalculations.proj_project_gm_percent__c =
-    projectCalculations.proj_project_gm__c /
-    projectCalculations.proj_contract_value__c;
+    projectCalculations.proj_contract_value__c !== 0
+      ? projectCalculations.proj_project_gm__c /
+        projectCalculations.proj_contract_value__c
+      : 0;
   projectCalculations.initialLoadCompleted__c = 1;
 
   const projectUpdateDetails = {

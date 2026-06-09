@@ -1,0 +1,6 @@
+{
+  "scriptType": "scheduled",
+  "environment": "sandbox",
+  "integrationScript": true,
+  "code": "// sample\nfunction helper(){\n  var req = { url: endpoint, headers: h };\n  var response = NSOA.https.post(req);\n  var p = NSOA.context.getParameter('customer_id');\n  var rr = { type: 'oaProject', method: 'equal to', fields: 'id,name', objects: [], attributes: [] };\n  var result = NSOA.wsapi.read(rr);\n  NSOA.meta.log('verbose', 'bad severity');\n  var oldRec = NSOA.form.getOldRecord();\n}"
+}

@@ -35,8 +35,37 @@ async function buildDeleteXml(criteria, logs) {
     ? criteria.recordsToDelete
     : [criteria.recordsToDelete];
 
-  if (criteria.lookupObj) {
-    // add record lookup, overwrite deletionRecords
+  for (const delRecord of deletionRecords) {
+    let criteriaXML = "";
+  
+    if(delRecord.id != null && delRecord.id !== "") {
+      criteriaXML = `<Delete type="${criteria.recordType}"><${criteria.recordType}><id>${delRecord.id}</id></${criteria.recordType}></Delete>`; 
+    }
+    else {
+      for (const [key,value] of Object.entries(delRecord)) {
+        if(typeof value==="object") { // example: {value: "value", lookupBy: "lookupBy Field", inTable: "table"}
+
+        }
+        else { // example: {projecttaskid: 287}
+          const recordRequest = {
+            authObj: criteria.authObj,
+            recordType: criteria.recordType,
+            criteriaObj: {
+              [key]: value,
+            },
+            limit: 1000,
+          };
+          const lookupRecords = await callSharedUtil(
+            "tslib-getRecords",
+            recordRequest,
+          );
+
+          if (lookupRecord?.id) {
+            criteriaXml+=`<Delete type="${criteria.recordType}"><${criteria.recordType}><id>${value}</id></${criteria.recordType}></Delete>`;
+
+          }
+        }
+      }
   }
 
   const xmlDeleteCommands = deletionRecords.map(

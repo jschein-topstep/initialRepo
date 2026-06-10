@@ -105,9 +105,9 @@ async function addLookups(event, origData, logs) {
           },
           limit: 1,
         };
-        let lookupRecord;
+        let lookupResult;
         try {
-          lookupRecord = await callSharedUtil(
+          lookupResult = await callSharedUtil(
             "tslib-getRecords",
             sppLookupRequest,
           );
@@ -116,6 +116,7 @@ async function addLookups(event, origData, logs) {
           console.error(err);
         }
         await sleep(100);
+        const lookupRecord = lookupResult?.[0];
         if (lookupRecord?.id) {
           //logs.push(`Lookup ID: ${lookupRecord.id}`);
           dataRow[`${inTable}_${returnField}`] = lookupRecord[`${returnField}`];
@@ -193,13 +194,14 @@ export const handler = async (event) => {
 
     //logs.push(`SPP response: ${responseText}`);
     const sppResponseXML = parser.parse(responseText);
-    const responseObject = sppResponseXML.response.Read[event.recordType];
-    /*const responseObject = Array.isArray(
-      sppResponseXML.response.Read[event.recordType],
-    )
-      ? sppResponseXML.response.Read[event.recordType]
-      : [sppResponseXML.response.Read[event.recordType]];
-*/
+    const rawResponseObject = sppResponseXML.response.Read[event.recordType];
+    const responseObject =
+      rawResponseObject === undefined
+        ? []
+        : Array.isArray(rawResponseObject)
+          ? rawResponseObject
+          : [rawResponseObject];
+
     const endResult = event.lookups
       ? await addLookups(event, responseObject, logs)
       : responseObject;

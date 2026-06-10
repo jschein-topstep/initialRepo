@@ -365,10 +365,11 @@ export const handler = async (event) => {
       limit: 1,
     };
 
-    const template = await callSharedUtil(
+    const templateRecords = await callSharedUtil(
       "tslib-getRecords",
       sppAttachmentRequest,
     );
+    const template = templateRecords?.[0];
 
     const usersToProcess = await getUsers();
     for (const user of usersToProcess) {

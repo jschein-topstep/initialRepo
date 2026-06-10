@@ -76,10 +76,11 @@ async function buildUpsertXml(criteria, logs) {
               },
               limit: 1,
             };
-            const lookupRecord = await callSharedUtil(
+            const lookupResult = await callSharedUtil(
               "tslib-getRecords",
               sppLookupRequest,
             );
+            const lookupRecord = lookupResult?.[0];
 
             if (lookupRecord?.id) {
               logs.push(`Lookup ID: ${lookupRecord.id}`);

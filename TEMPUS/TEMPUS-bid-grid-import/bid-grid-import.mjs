@@ -49,12 +49,12 @@ async function getAttachment(fileId) {
     },
     limit: 1,
   };
-  const attachmentRecord = await callSharedUtil(
+  const attachmentRecords = await callSharedUtil(
     "tslib-getRecords",
     sppAttachmentRequest,
   );
 
-  return attachmentRecord;
+  return attachmentRecords?.[0];
 }
 
 async function newBidGridLoad(
@@ -420,10 +420,11 @@ export const handler = async (event) => {
     },
     limit: 1,
   };
-  const projectRecord = await callSharedUtil(
+  const projectRecords = await callSharedUtil(
     "tslib-getRecords",
     sppProjectRequest,
   );
+  const projectRecord = projectRecords?.[0];
   console.log(`Project ID: ${projectRecord.id}`);
 
   const phaseObjArray = [];

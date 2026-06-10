@@ -40,10 +40,7 @@ async function deleteExistingTasks(projId) {
   return;
 }
 
-export const handler = async (event) => {
-  const bodyJSON = JSON.parse(event.body);
-  const fileId = bodyJSON.fileId;
-
+async function getAttachment(fileId) {
   const sppAttachmentRequest = {
     authObj: authObj,
     recordType: "Attachment",
@@ -57,59 +54,19 @@ export const handler = async (event) => {
     sppAttachmentRequest,
   );
 
-  const base64 = atob(attachmentRecord.base64_data);
-  const fileLines = parse(base64, {
-    columns: true,
-    skip_empty_lines: true,
-  });
+  return attachmentRecord;
+}
 
-  const phaseNames = [];
-  console.log(`headers: ${JSON.stringify(fileLines[0])}`);
+async function newBidGridLoad(
+  fileLines,
+  projectRecord,
+  projectCalculations,
+  phaseObjArray,
+  taskObjArray,
+  assignmentObjArray,
+) {
+  const deleteResponse = await deleteExistingTasks(projectRecord.id);
 
-  const projectName = fileLines[0]["Project ID"];
-  const sppProjectRequest = {
-    authObj: authObj,
-    recordType: "Project",
-    criteriaObj: {
-      name: projectName,
-    },
-    limit: 1,
-  };
-  const projectRecord = await callSharedUtil(
-    "tslib-getRecords",
-    sppProjectRequest,
-  );
-  console.log(`Project ID: ${projectRecord.id}`);
-
-  //const deleteResponse = await deleteExistingTasks(projectRecord.id);
-
-  const inflationPlusDiscount =
-    parseFloat(projectRecord.proj_inflation__c) +
-    parseFloat(projectRecord.proj_discount__c);
-
-  const projectCalculations = {
-    id: projectRecord.id,
-    proj_directs__c: 0,
-    proj_total_direct__c: inflationPlusDiscount,
-    proj_pt__c: 0,
-    proj_pt_fees__c: 0,
-    proj_pt_total__c: 0,
-    proj_ig__c: 0,
-    proj_contract_value__c: inflationPlusDiscount,
-    proj_direct_cost__c: 0,
-    proj_pt_cost__c: 0,
-    proj_ig_cost__c: 0,
-    proj_total_cost__c: 0,
-    proj_direct_gm__c: 0,
-    proj_direct_gm_percent__c: 0,
-    proj_project_gm__c: inflationPlusDiscount,
-    proj_project_gm_percent__c: 0,
-    proj_total_hours__c: 0,
-  };
-  // check for initial load complete box checked -- projectRecord.fieldName. If checked then update, otherwise proceed normally
-  const phaseObjArray = [];
-  const taskObjArray = [];
-  const assignmentObjArray = [];
   for (let i = 0; i < fileLines.length; i++) {
     if (fileLines[i]["Header"]?.length > 0) {
       let matchingPhaseObject = phaseObjArray.find(
@@ -118,7 +75,7 @@ export const handler = async (event) => {
 
       if (matchingPhaseObject === undefined) {
         // the phase has not been encountered yet
-        const phaseExtId = `proj${projectRecord.id}_phase${phaseObjArray.length}`;
+        const phaseExtId = `proj${projectRecord.id}_phase${fileLines[i]["Header"]}`;
         const newPhaseObj = {
           projectid: projectRecord.id,
           name: fileLines[i]["Header"],
@@ -136,7 +93,7 @@ export const handler = async (event) => {
 
       if (matchingTaskObject === undefined) {
         // the task has not been encountered yet
-        const taskExtId = `proj${projectRecord.id}_task${taskObjArray.length}`;
+        const taskExtId = `proj${projectRecord.id}_task${fileLines[i]["Unit Number"]}`;
         const newTaskObj = {
           projectid: projectRecord.id,
           name: fileLines[i]["Unit Name"],
@@ -194,42 +151,371 @@ export const handler = async (event) => {
       accumulateProjectTotals(fileLines[i], projectCalculations);
     }
   }
+}
+
+async function updateBidGridValues(
+  newCsv,
+  projectRecord,
+  projectCalculations,
+  phaseObjArray,
+  taskObjArray,
+  assignmentObjArray,
+) {
+  const previousFileRaw = await getAttachment(
+    projectRecord.previousBidGridAttachmentId__c,
+  );
+  const originalCsv = atob(previousFileRaw.base64_data);
+
+  const fieldDefinitions = [
+    {
+      entity: "Projecttask (Phase)",
+      fields: [],
+      key: "Header",
+    },
+    {
+      entity: "Projecttask",
+      fields: [
+        "Budget Category",
+        "Revenue Account",
+        "Unit Name",
+        "Unit Basis",
+        "# of Units",
+      ],
+      key: "Unit Number",
+    },
+    {
+      entity: "Projecttaskassign",
+      fields: [
+        "Team",
+        "Functional Area",
+        "Total Hours",
+        "Total Cost",
+        "Total Bid",
+      ],
+      key: ["Unit Number", "Bid Role"],
+    },
+  ];
+
+  const diffResults = await callSharedUtil("tslib-csvDiff", {
+    originalCsv,
+    newCsv,
+    fieldDefinitions,
+  });
+
+  //return diffResults;
+  const phaseInfo = diffResults[0]["Projecttask (Phase)"];
+  const taskInfo = diffResults[1]["Projecttask"];
+  const assignmentInfo = diffResults[2]["Projecttaskassign"];
+
+  await processPhaseUpdates(projectRecord, phaseInfo, phaseObjArray);
+  await processTaskUpdates(projectRecord, taskInfo, taskObjArray);
+  await processAssignmentUpdates(
+    projectRecord,
+    assignmentInfo,
+    assignmentObjArray,
+  );
+
+  /*
+  let matchingTaskObject = taskObjArray.find(
+    (task) => task.name === fileLines[i]["Unit Name"],
+  );
+
+  if (matchingTaskObject === undefined) {
+    // the task has not been encountered yet
+    const taskExtId = `proj${projectRecord.id}_task${taskObjArray.length}`;
+    const newTaskObj = {
+      projectid: projectRecord.id,
+      name: fileLines[i]["Unit Name"],
+      is_a_phase: "",
+      parentid: {
+        value: matchingPhaseObject.externalid,
+        lookupBy: "externalid",
+        inTable: "Projecttask",
+      },
+      unit_budget_cat__c: fileLines[i]["Budget Category"],
+      service: {
+        value: fileLines[i]["Revenue Account"],
+        lookupBy: "name",
+        inTable: "Category",
+      },
+      id_number: fileLines[i]["Unit Number"],
+      unit_basis__c: fileLines[i]["Unit Basis"],
+      number_units__c: fileLines[i]["# of Units"],
+      externalid: taskExtId,
+    };
+
+    taskObjArray.push(newTaskObj);
+    matchingTaskObject = newTaskObj;
+  }
+
+  const newAssignmentObj = {
+    projectid: projectRecord.id,
+    projecttaskid: {
+      value: matchingTaskObject.externalid,
+      lookupBy: "externalid",
+      inTable: "Projecttask",
+    },
+    costCenter: {
+      value: fileLines[i]["Team"],
+      lookupBy: "name",
+      inTable: "Costcenter",
+    },
+    assign_functional_area__c: {
+      value: fileLines[i]["Functional Area"],
+      lookupBy: "name",
+      inTable: "Department",
+    },
+    userid: {
+      value: fileLines[i]["Bid Role"],
+      lookupBy: "name",
+      inTable: "User",
+    },
+    planned_hours: fileLines[i]["total hours"],
+    assign_cost__c: fileLines[i]["Total Cost"],
+    assign_bid__c: fileLines[i]["Total Bid"],
+  };
+
+  assignmentObjArray.push(newAssignmentObj);
+
+  accumulateProjectTotals(fileLines[i], projectCalculations);
+  */
+}
+
+async function processPhaseUpdates(projectRecord, phaseInfo, phaseObjArray) {
+  for (const phaseAdded of phaseInfo.added) {
+    const phaseExtId = `proj${projectRecord.id}_phase${phaseAdded.row["Header"]}`;
+    const newPhaseObj = {
+      projectid: projectRecord.id,
+      name: phaseAdded.row["Header"],
+      is_a_phase: 1,
+      externalid: phaseExtId,
+    };
+    phaseObjArray.push(newPhaseObj);
+  }
+
+  // phaseModified can not be determined -- it'll show up as an add or a delete
+
+  /*
+  for (const phaseDeleted of phaseInfo.deleted) {
+    const phaseExtId = `proj${projectRecord.id}_phase${phaseDeleted.row["Header"]}`;
+    const phaseObjToBeDeleted = {
+      projectid: projectRecord.id,
+      name: phaseAdded.row["Header"],
+      is_a_phase: 1,
+      externalid: phaseExtId,
+    };
+    phaseObjArray.push(newPhaseObj);
+  }
+    */
+}
+
+async function processTaskUpdates(projectRecord, taskInfo, taskObjArray) {
+  const allTaskChanges = [
+    ...taskInfo.added.map((task) => ({ task, isModified: false })),
+    ...taskInfo.modified.map((task) => ({ task, isModified: true })),
+  ];
+  for (const { task, isModified } of allTaskChanges) {
+    const taskExtId = `proj${projectRecord.id}_task${task.row["Unit Number"]}`;
+    const phaseExtId = `proj${projectRecord.id}_phase${task.row["Header"]}`;
+    const newTaskObj = {
+      projectid: projectRecord.id,
+      name: task.row["Unit Name"],
+      parentid: {
+        value: phaseExtId,
+        lookupBy: "externalid",
+        inTable: "Projecttask",
+      },
+      unit_budget_cat__c: task.row["Budget Category"],
+      service: {
+        value: task.row["Revenue Account"],
+        lookupBy: "name",
+        inTable: "Category",
+      },
+      id_number: task.row["Unit Number"],
+      unit_basis__c: task.row["Unit Basis"],
+      number_units__c: task.row["# of Units"],
+      externalid: taskExtId,
+      ...(isModified && {
+        id: {
+          value: taskExtId,
+          lookupBy: "externalid",
+          inTable: "Projecttask",
+        },
+      }),
+    };
+    taskObjArray.push(newTaskObj);
+  }
+}
+
+async function processAssignmentUpdates(
+  projectRecord,
+  assignmentInfo,
+  assignmentObjArray,
+) {
+  const allAssignmentChanges = [
+    ...assignmentInfo.added.map((assignment) => ({
+      assignment,
+      isModified: false,
+    })),
+    ...assignmentInfo.modified.map((assignment) => ({
+      assignment,
+      isModified: true,
+    })),
+  ];
+  for (const { assignment, isModified } of allAssignmentChanges) {
+    const taskExtId = `proj${projectRecord.id}_task${assignment.row["Unit Number"]}`;
+
+    const newAssignmentObj = {
+      projectid: projectRecord.id,
+      projecttaskid: {
+        value: taskExtId,
+        lookupBy: "externalid",
+        inTable: "Projecttask",
+      },
+      costCenter: {
+        value: assignment.row["Team"],
+        lookupBy: "name",
+        inTable: "Costcenter",
+      },
+      assign_functional_area__c: {
+        value: assignment.row["Functional Area"],
+        lookupBy: "name",
+        inTable: "Department",
+      },
+      userid: {
+        value: assignment.row["Bid Role"],
+        lookupBy: "name",
+        inTable: "User",
+      },
+      planned_hours: assignment.row["total hours"],
+      assign_cost__c: assignment.row["Total Cost"],
+      assign_bid__c: assignment.row["Total Bid"],
+    };
+
+    assignmentObjArray.push(newAssignmentObj);
+  }
+}
+
+export const handler = async (event) => {
+  const bodyJSON = JSON.parse(event.body);
+  const fileId = bodyJSON.fileId;
+
+  const attachmentRecord = await getAttachment(fileId);
+
+  const base64 = atob(attachmentRecord.base64_data);
+  const fileLines = parse(base64, {
+    columns: true,
+    skip_empty_lines: true,
+  });
+
+  const phaseNames = [];
+  console.log(`headers: ${JSON.stringify(fileLines[0])}`);
+
+  const projectName = fileLines[0]["Project ID"];
+  const sppProjectRequest = {
+    authObj: authObj,
+    recordType: "Project",
+    criteriaObj: {
+      name: projectName,
+    },
+    limit: 1,
+  };
+  const projectRecord = await callSharedUtil(
+    "tslib-getRecords",
+    sppProjectRequest,
+  );
+  console.log(`Project ID: ${projectRecord.id}`);
+
+  const phaseObjArray = [];
+  const taskObjArray = [];
+  const assignmentObjArray = [];
+
+  const inflationPlusDiscount =
+    parseFloat(projectRecord.proj_inflation__c) +
+    parseFloat(projectRecord.proj_discount__c);
+
+  const projectCalculations = {
+    id: projectRecord.id,
+    proj_directs__c: 0,
+    proj_total_direct__c: inflationPlusDiscount,
+    proj_pt__c: 0,
+    proj_pt_fees__c: 0,
+    proj_pt_total__c: 0,
+    proj_ig__c: 0,
+    proj_contract_value__c: inflationPlusDiscount,
+    proj_direct_cost__c: 0,
+    proj_pt_cost__c: 0,
+    proj_ig_cost__c: 0,
+    proj_total_cost__c: 0,
+    proj_direct_gm__c: 0,
+    proj_direct_gm_percent__c: 0,
+    proj_project_gm__c: inflationPlusDiscount,
+    proj_project_gm_percent__c: 0,
+    proj_total_hours__c: 0,
+  };
+  // check for initial load complete box checked -- projectRecord.fieldName. If checked then update, otherwise proceed normally
+
+  if (projectRecord.previousBidGridAttachmentId__c) {
+    await updateBidGridValues(
+      base64,
+      projectRecord,
+      projectCalculations,
+      phaseObjArray,
+      taskObjArray,
+      assignmentObjArray,
+    );
+  } else {
+    await newBidGridLoad(
+      fileLines,
+      projectRecord,
+      projectCalculations,
+      phaseObjArray,
+      taskObjArray,
+      assignmentObjArray,
+    );
+  }
 
   // create phases
-  const phaseWriteRequest = {
-    authObj: authObj,
-    recordType: "Projecttask",
-    writeObj: phaseObjArray,
-  };
+  if (phaseObjArray.length > 0) {
+    const phaseWriteRequest = {
+      authObj: authObj,
+      recordType: "Projecttask",
+      writeObj: phaseObjArray,
+    };
 
-  const phaseWriteResponse = await callSharedUtil(
-    "tslib-putRecords",
-    phaseWriteRequest,
-  );
+    const phaseWriteResponse = await callSharedUtil(
+      "tslib-putRecords",
+      phaseWriteRequest,
+    );
+  }
 
   // create tasks
-  const taskWriteRequest = {
-    authObj: authObj,
-    recordType: "Projecttask",
-    writeObj: taskObjArray,
-  };
+  if (taskObjArray.length > 0) {
+    const taskWriteRequest = {
+      authObj: authObj,
+      recordType: "Projecttask",
+      writeObj: taskObjArray,
+    };
 
-  const taskWriteResponse = await callSharedUtil(
-    "tslib-putRecords",
-    taskWriteRequest,
-  );
+    const taskWriteResponse = await callSharedUtil(
+      "tslib-putRecords",
+      taskWriteRequest,
+    );
+  }
 
   // create assignments
-  const assignmentWriteRequest = {
-    authObj: authObj,
-    recordType: "Projecttaskassign",
-    writeObj: assignmentObjArray,
-  };
+  if (assignmentObjArray.length > 0) {
+    const assignmentWriteRequest = {
+      authObj: authObj,
+      recordType: "Projecttaskassign",
+      writeObj: assignmentObjArray,
+    };
 
-  const assignmentWriteResponse = await callSharedUtil(
-    "tslib-putRecords",
-    assignmentWriteRequest,
-  );
+    const assignmentWriteResponse = await callSharedUtil(
+      "tslib-putRecords",
+      assignmentWriteRequest,
+    );
+  }
 
   projectCalculations.proj_direct_gm_percent__c =
     projectCalculations.proj_directs__c !== 0
@@ -241,7 +527,7 @@ export const handler = async (event) => {
       ? projectCalculations.proj_project_gm__c /
         projectCalculations.proj_contract_value__c
       : 0;
-  projectCalculations.initialLoadCompleted__c = 1;
+  projectCalculations.previousBidGridAttachmentId__c = fileId;
 
   const projectUpdateDetails = {
     authObj: authObj,
@@ -301,7 +587,7 @@ function accumulateProjectTotals(record, projectCalculations) {
 
 async function test() {
   const result = await handler({
-    body: '{"fileId":19}',
+    body: '{"fileId":53}',
   });
   console.log(JSON.stringify(result, null, 2));
 }

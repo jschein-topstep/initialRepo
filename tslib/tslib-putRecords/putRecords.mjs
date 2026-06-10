@@ -44,79 +44,77 @@ async function buildUpsertXml(criteria, logs) {
     let criteriaXML = "";
     let action = "Add";
 
-    for (const key in writeObj) {
-      if (Object.prototype.hasOwnProperty.call(writeObj, key)) {
-        if (key === "id") {
-          action = "Modify";
-        }
+    for (const key of Object.keys(writeObj)) {
+      if (key === "id") {
+        action = "Modify";
+      }
 
-        if (typeof writeObj[key] === "object") {
-          const value = writeObj[key].value;
-          const lookupBy = writeObj[key].lookupBy;
-          const inTable = writeObj[key].inTable;
+      if (typeof writeObj[key] === "object") {
+        const value = writeObj[key].value;
+        const lookupBy = writeObj[key].lookupBy;
+        const inTable = writeObj[key].inTable;
 
-          if (lookupBy === "externalid") {
-            criteriaXML += `<${key} external="${inTable}">${value}</${key}>`;
+        if (lookupBy === "externalid") {
+          criteriaXML += `<${key} external="${inTable}">${value}</${key}>`;
+        } else {
+          let idValue;
+          const foundStoredObject = valueStore.find(
+            (storedObject) =>
+              storedObject.inTable == inTable &&
+              storedObject.lookupBy == lookupBy &&
+              storedObject.value == value,
+          );
+
+          if (foundStoredObject) {
+            criteriaXML += `<${key}>${foundStoredObject.idValue}</${key}>`;
           } else {
-            let idValue;
-            const foundStoredObject = valueStore.find(
-              (storedObject) =>
-                storedObject.inTable == inTable &&
-                storedObject.lookupBy == lookupBy &&
-                storedObject.value == value,
+            const sppLookupRequest = {
+              authObj: criteria.authObj,
+              recordType: inTable,
+              criteriaObj: {
+                [lookupBy]: value,
+              },
+              limit: 1,
+            };
+            const lookupRecord = await callSharedUtil(
+              "tslib-getRecords",
+              sppLookupRequest,
             );
 
-            if (foundStoredObject) {
-              criteriaXML += `<${key}>${foundStoredObject.idValue}</${key}>`;
+            if (lookupRecord?.id) {
+              logs.push(`Lookup ID: ${lookupRecord.id}`);
+              criteriaXML += `<${key}>${lookupRecord.id}</${key}>`;
+              valueStore.push({
+                inTable: inTable,
+                lookupBy: lookupBy,
+                value: value,
+                idValue: lookupRecord.id,
+              });
             } else {
-              const sppLookupRequest = {
-                authObj: criteria.authObj,
-                recordType: inTable,
-                criteriaObj: {
-                  [lookupBy]: value,
-                },
-                limit: 1,
-              };
-              const lookupRecord = await callSharedUtil(
-                "tslib-getRecords",
-                sppLookupRequest,
-              );
-
-              if (lookupRecord?.id) {
-                logs.push(`Lookup ID: ${lookupRecord.id}`);
-                criteriaXML += `<${key}>${lookupRecord.id}</${key}>`;
-                valueStore.push({
-                  inTable: inTable,
-                  lookupBy: lookupBy,
-                  value: value,
-                  idValue: lookupRecord.id,
-                });
-              } else {
-                logs.push(`Nothing returned for lookup request`);
-              }
+              logs.push(`Nothing returned for lookup request`);
             }
           }
-        } else {
-          if (key === "date") {
-            let d;
-            if (/^\d{4}-\d{2}-\d{2}$/.test(writeObj[key])) {
-              var parts = writeObj[key].split("-");
-              d = new Date(
-                parseInt(parts[0], 10), // year
-                parseInt(parts[1], 10) - 1, // month (0-based)
-                parseInt(parts[2], 10), // day
-              );
-            } else {
-              const d = new Date(writeObj[key]);
-            }
-            const pad = (num) => {
-              return num.toString().padStart(2, "0");
-            };
-            const dateStr = `<Date><year>${d.getFullYear()}</year><month>${pad(d.getMonth() + 1)}</month><day>${pad(d.getDate())}</day></Date>`;
-            criteriaXML += `<${key}>${dateStr}</${key}>`;
+        }
+      } else {
+        if (key === "date") {
+          let d;
+          if (/^\d{4}-\d{2}-\d{2}$/.test(writeObj[key])) {
+            var parts = writeObj[key].split("-");
+            d = new Date(
+              parseInt(parts[0], 10), // year
+              parseInt(parts[1], 10) - 1, // month (0-based)
+              parseInt(parts[2], 10), // day
+            );
           } else {
-            criteriaXML += `<${key}>${writeObj[key]}</${key}>`;
+            const d = new Date(writeObj[key]);
           }
+          const pad = (num) => {
+            return num.toString().padStart(2, "0");
+          };
+          const dateStr = `<Date><year>${d.getFullYear()}</year><month>${pad(d.getMonth() + 1)}</month><day>${pad(d.getDate())}</day></Date>`;
+          criteriaXML += `<${key}>${dateStr}</${key}>`;
+        } else {
+          criteriaXML += `<${key}>${writeObj[key]}</${key}>`;
         }
       }
     }

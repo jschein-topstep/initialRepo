@@ -136,12 +136,12 @@ export const handler = async (event) => {
 async function test() {
   const result = await handler({
     authObj: {
-      company: "top step sandbox",
-      user: "jschein",
-      password: "Topstep1",
+      company: "Tempus Sandbox",
+      user: "ronn.breaux@tempus.com",
+      password: "Spring2026$!",
       instance: "sb",
     },
-    recordType: "Task",
+    recordType: "Projecttaskassign",
     recordsToDelete: [
       {
         id: 154544,

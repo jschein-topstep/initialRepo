@@ -26,7 +26,7 @@ async function buildDeleteXml(criteria, logs) {
     }),
   );
   const prodKey = prodResponse.Parameter.Value;
-
+  let xmlDeleteCommands = "";
   const instanceIdentifier = /^(sb|sandbox)$/i.test(criteria.authObj.instance)
     ? { apiKey: sbKey, suffix: "sb" }
     : { apiKey: prodKey, suffix: "prod" };
@@ -36,17 +36,29 @@ async function buildDeleteXml(criteria, logs) {
     : [criteria.recordsToDelete];
 
   for (const delRecord of deletionRecords) {
-    let criteriaXML = "";
-  
-    if(delRecord.id != null && delRecord.id !== "") {
-      criteriaXML = `<Delete type="${criteria.recordType}"><${criteria.recordType}><id>${delRecord.id}</id></${criteria.recordType}></Delete>`; 
-    }
-    else {
-      for (const [key,value] of Object.entries(delRecord)) {
-        if(typeof value==="object") { // example: {value: "value", lookupBy: "lookupBy Field", inTable: "table"}
+    if (typeof delRecord !== "object" || delRecord === null) {
+      xmlDeleteCommands += `<Delete type="${criteria.recordType}"><${criteria.recordType}><id>${delRecord}</id></${criteria.recordType}></Delete>`;
+    } else if (delRecord.id != null && delRecord.id !== "") {
+      xmlDeleteCommands += `<Delete type="${criteria.recordType}"><${criteria.recordType}><id>${delRecord.id}</id></${criteria.recordType}></Delete>`;
+    } else {
+      for (const [key, value] of Object.entries(delRecord)) {
+        if (typeof value === "object") {
+          // example: {value: "value", lookupBy: "lookupBy Field", inTable: "table"}
+          // UNFINISHED - DO NOT USE
+          const inTable = value.inTable;
+          const fieldValue = value.value;
+          const lookupBy = value.lookupBy;
 
-        }
-        else { // example: {projecttaskid: 287}
+          const recordRequest = {
+            authObj: criteria.authObj,
+            recordType: inTable,
+            criteriaObj: {
+              [lookupBy]: value,
+            },
+            limit: 1000,
+          };
+        } else {
+          // example: {projecttaskid: 287}
           const recordRequest = {
             authObj: criteria.authObj,
             recordType: criteria.recordType,
@@ -60,18 +72,16 @@ async function buildDeleteXml(criteria, logs) {
             recordRequest,
           );
 
-          if (lookupRecord?.id) {
-            criteriaXml+=`<Delete type="${criteria.recordType}"><${criteria.recordType}><id>${value}</id></${criteria.recordType}></Delete>`;
-
+          for (const lookupRecord of lookupRecords) {
+            if (lookupRecord?.id) {
+              xmlDeleteCommands += `<Delete type="${criteria.recordType}"><${criteria.recordType}><id>${lookupRecord.id}</id></${criteria.recordType}></Delete>`;
+            }
           }
         }
       }
+    }
   }
 
-  const xmlDeleteCommands = deletionRecords.map(
-    (record) =>
-      `<Delete type="${criteria.recordType}"><${criteria.recordType}><id>${typeof record === "object" ? record.id : record}</id></${criteria.recordType}></Delete>`,
-  );
   const accessToken = await getValidAccessToken(
     `spp-${criteria.authObj.company.toLowerCase()}-${instanceIdentifier.suffix}`,
   );
@@ -83,7 +93,7 @@ async function buildDeleteXml(criteria, logs) {
                   <access_token>${accessToken}</access_token>
           </Login>
         </Auth>
-        ${xmlDeleteCommands.join("")}
+        ${xmlDeleteCommands}
       </request>`;
 }
 
@@ -173,9 +183,11 @@ async function test() {
     recordType: "Projecttaskassign",
     recordsToDelete: [
       {
-        id: 154544,
+        projecttaskid: 2725,
       },
-      { id: 155817 },
+      {
+        projecttaskid: 2726,
+      },
     ],
   });
   console.log(JSON.stringify(result, null, 2));

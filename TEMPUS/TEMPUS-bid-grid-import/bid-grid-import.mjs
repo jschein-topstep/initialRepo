@@ -209,10 +209,12 @@ async function calculateUnitPricePer(projId) {
         recordType: "Projectbillingrule",
         writeObj: {
           active: 1,
+          type: "T",
           categoryid: taskRecord.default_category,
           name: `Billing rule for ${taskRecord.name}`,
-          project_task_id: taskRecord.id,
+          project_task_filter: taskRecord.id,
           projectid: projId,
+          rate_from: "U",
         },
       };
 
@@ -221,21 +223,18 @@ async function calculateUnitPricePer(projId) {
         billingRuleDetails,
       );
 
-      /*const uprateDetails = {
+      const uprateDetails = {
         authObj: authObj,
         recordType: "Uprate",
         writeObj: {
           categoryid: taskRecord.default_category,
           userid: 251,
-          rate: unitPrice,
-          project_billing_ruleid: billingRuleUpdate[0].id,
+          rate: taskRecord.unit_price_per__c, //unitPrice,
+          project_billing_ruleid: billingRuleUpdate.id,
         },
       };
 
-      const uprateAdd = await callSharedUtil(
-        "tslib-putRecords",
-        billingRuleDetails,
-      );*/
+      const uprateAdd = await callSharedUtil("tslib-putRecords", uprateDetails);
     }
   }
 }
@@ -301,7 +300,6 @@ async function updateBidGridValues(
     assignmentObjArray,
   );
 
-  /*
   let matchingTaskObject = taskObjArray.find(
     (task) => task.name === fileLines[i]["Unit Name"],
   );
@@ -364,7 +362,6 @@ async function updateBidGridValues(
   assignmentObjArray.push(newAssignmentObj);
 
   accumulateProjectTotals(fileLines[i], projectCalculations);
-  */
 }
 
 async function processPhaseUpdates(projectRecord, phaseInfo, phaseObjArray) {
@@ -657,7 +654,7 @@ export const handler = async (event) => {
   };
   // check for initial load complete box checked -- projectRecord.fieldName. If checked then update, otherwise proceed normally
 
-  /*if (projectRecord.previousBidGridAttachmentId__c) {
+  if (projectRecord.previousBidGridAttachmentId__c) {
     await updateBidGridValues(
       base64,
       projectRecord,
@@ -718,7 +715,7 @@ export const handler = async (event) => {
       assignmentWriteRequest,
     );
   }
-*/
+
   await calculateUnitPricePer(projectRecord.id);
 
   projectCalculations.proj_direct_gm_percent__c =

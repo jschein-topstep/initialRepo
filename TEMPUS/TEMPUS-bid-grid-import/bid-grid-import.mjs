@@ -352,6 +352,51 @@ async function processAssignmentUpdates(
   assignmentInfo,
   assignmentObjArray,
 ) {
+  for (const deletedAssignment of assignmentInfo.deleted) {
+    const identifier = deletedAssignment["Unit Number|Bid Role"];
+    const taskIdNumber = identifier.substring(0, identifier.indexOf("|"));
+    const userName = identifier.substring(
+      identifier.indexOf("|") + 1,
+      identifier.length,
+    );
+
+    const sppTaskRequest = {
+      authObj: authObj,
+      recordType: "Projecttask",
+      criteriaObj: {
+        projectid: projectRecord.id,
+        id_number: taskIdNumber,
+      },
+      limit: 1,
+    };
+    const taskRecords = await callSharedUtil(
+      "tslib-getRecords",
+      sppTaskRequest,
+    );
+
+    if (taskRecords && taskRecords.length > 0) {
+      const taskId = taskRecords[0].id;
+      const sppAssignmentRequest = {
+        authObj: authObj,
+        recordType: "Projecttaskassign",
+        criteriaObj: {
+          projecttaskid: taskId,
+          userid: {
+            value: userName,
+            lookupBy: "name",
+            inTable: "User",
+          },
+        },
+        limit: 1,
+      };
+      const assignmentRecords = await callSharedUtil(
+        "tslib-getRecords",
+        sppAssignmentRequest,
+      );
+      console.log("here");
+    }
+  }
+
   const allAssignmentChanges = [
     ...assignmentInfo.added.map((assignment) => ({
       assignment,
@@ -362,6 +407,7 @@ async function processAssignmentUpdates(
       isModified: true,
     })),
   ];
+
   for (const { assignment, isModified } of allAssignmentChanges) {
     const taskExtId = `proj${projectRecord.id}_task${assignment.row["Unit Number"]}`;
 
@@ -588,7 +634,7 @@ function accumulateProjectTotals(record, projectCalculations) {
 
 async function test() {
   const result = await handler({
-    body: '{"fileId":53}',
+    body: '{"fileId":86}',
   });
   console.log(JSON.stringify(result, null, 2));
 }

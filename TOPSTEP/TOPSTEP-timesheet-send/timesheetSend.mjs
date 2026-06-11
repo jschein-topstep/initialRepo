@@ -208,6 +208,10 @@ async function createSpreadsheet(taskData, template, userId) {
     tasks.push({ name: row.name, id: row.id, projectId: row.projectid });
   }
 
+  customers.sort((a, b) => a.name.localeCompare(b.name));
+  projects.sort((a, b) => a.name.localeCompare(b.name));
+  tasks.sort((a, b) => a.name.localeCompare(b.name));
+
   // Build Data sheet rows
   const allRows = new Map();
 

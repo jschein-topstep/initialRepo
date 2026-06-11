@@ -38,9 +38,24 @@ async function buildReadXml(xmlCriteria, logs) {
     : { apiKey: prodKey, suffix: "prod" };
 
   let criteriaXML = "";
-  for (const key in xmlCriteria.criteriaObj) {
-    if (Object.prototype.hasOwnProperty.call(xmlCriteria.criteriaObj, key)) {
-      criteriaXML += `<${key}>${xmlCriteria.criteriaObj[key]}</${key}>`;
+  for (const [key, value] of Object.entries(xmlCriteria.criteriaObj)) {
+    if (typeof value === "object") {
+      const returnField = value.returnField || "id";
+      const sppRequest = {
+        authObj: xmlCriteria.authObj,
+        recordType: value.inTable,
+        criteriaObj: {
+          [value.lookupBy]: value.value,
+        },
+        limit: 1,
+        fields: returnField,
+      };
+      const sppRecords = await callSharedUtil("tslib-getRecords", sppRequest);
+      if (sppRecords && sppRecords.length > 0) {
+        criteriaXML += `<${key}>${sppRecords[0][returnField]}</${key}>`;
+      }
+    } else {
+      criteriaXML += `<${key}>${value}</${key}>`;
     }
   }
 
@@ -222,7 +237,7 @@ export const handler = async (event) => {
 
 // ── Local testing only ──────────────────────────────────────────────────────
 
-async function test() {
+async function test0() {
   const result = await handler({
     authObj: {
       company: "Tempus Sandbox",
@@ -249,6 +264,26 @@ async function test() {
   console.log(JSON.stringify(result, null, 2));
 }
 
+async function test1() {
+  const result = await handler({
+    authObj: {
+      company: "Tempus Sandbox",
+      instance: "sandbox",
+    },
+    recordType: "Projecttaskassign",
+    criteriaObj: {
+      projecttaskid: 2881,
+      userid: {
+        value: "Sr. Data Manager",
+        lookupBy: "name",
+        inTable: "User",
+      },
+    },
+    limit: 1,
+  });
+  console.log(JSON.stringify(result, null, 2));
+}
+
 if (!process.env.AWS_LAMBDA_FUNCTION_NAME) {
-  test();
+  test1();
 }

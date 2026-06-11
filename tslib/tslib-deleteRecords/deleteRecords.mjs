@@ -183,10 +183,10 @@ async function test() {
     recordType: "Projecttaskassign",
     recordsToDelete: [
       {
-        projecttaskid: 2725,
+        projecttaskid: 2877,
       },
       {
-        projecttaskid: 2726,
+        projecttaskid: 2878,
       },
     ],
   });

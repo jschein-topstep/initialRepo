@@ -104,7 +104,7 @@ async function newBidGridLoad(
             inTable: "Projecttask",
           },
           unit_budget_cat__c: fileLines[i]["Budget Category"],
-          service: {
+          default_category: {
             value: fileLines[i]["Revenue Account"],
             lookupBy: "name",
             inTable: "Category",
@@ -112,6 +112,8 @@ async function newBidGridLoad(
           id_number: fileLines[i]["Unit Number"],
           unit_basis__c: fileLines[i]["Unit Basis"],
           number_units__c: fileLines[i]["# of Units"],
+
+          projecttask_typeid: 2,
           externalid: taskExtId,
         };
 
@@ -153,6 +155,90 @@ async function newBidGridLoad(
   }
 }
 
+async function calculateUnitPricePer(projId) {
+  const sppTaskRequest = {
+    authObj: authObj,
+    recordType: "Projecttask",
+    criteriaObj: {
+      projectid: projId,
+    },
+    limit: 1000,
+  };
+  const taskRecords = await callSharedUtil("tslib-getRecords", sppTaskRequest);
+
+  for (const taskRecord of taskRecords) {
+    if (taskRecord.is_a_phase != 1) {
+      const sppAssignmentRequest = {
+        authObj: authObj,
+        recordType: "Projecttaskassign",
+        criteriaObj: {
+          projecttaskid: taskRecord.id,
+        },
+        limit: 1000,
+      };
+      const assignmentRecords = await callSharedUtil(
+        "tslib-getRecords",
+        sppAssignmentRequest,
+      );
+      let assignmentTotal = 0;
+      for (const assignmentRecord of assignmentRecords) {
+        assignmentTotal += parseFloat(assignmentRecord.assign_bid__c);
+      }
+
+      const unitPrice =
+        taskRecord.number_units__c !== 0
+          ? assignmentTotal / taskRecord.number_units__c
+          : 0;
+      const taskUpdateDetails = {
+        authObj: authObj,
+        recordType: "Projecttask",
+        writeObj: {
+          id: taskRecord.id,
+          unit_total_bid__c: assignmentTotal,
+          unit_price_per__c: unitPrice,
+        },
+      };
+
+      const taskUpdate = await callSharedUtil(
+        "tslib-putRecords",
+        taskUpdateDetails,
+      );
+
+      const billingRuleDetails = {
+        authObj: authObj,
+        recordType: "Projectbillingrule",
+        writeObj: {
+          active: 1,
+          categoryid: taskRecord.default_category,
+          name: `Billing rule for ${taskRecord.name}`,
+          project_task_id: taskRecord.id,
+          projectid: projId,
+        },
+      };
+
+      const billingRuleUpdate = await callSharedUtil(
+        "tslib-putRecords",
+        billingRuleDetails,
+      );
+
+      /*const uprateDetails = {
+        authObj: authObj,
+        recordType: "Uprate",
+        writeObj: {
+          categoryid: taskRecord.default_category,
+          userid: 251,
+          rate: unitPrice,
+          project_billing_ruleid: billingRuleUpdate[0].id,
+        },
+      };
+
+      const uprateAdd = await callSharedUtil(
+        "tslib-putRecords",
+        billingRuleDetails,
+      );*/
+    }
+  }
+}
 async function updateBidGridValues(
   newCsv,
   projectRecord,
@@ -310,9 +396,13 @@ async function processPhaseUpdates(projectRecord, phaseInfo, phaseObjArray) {
 }
 
 async function processTaskUpdates(projectRecord, taskInfo, taskObjArray) {
+  for (const taskDeletion of taskInfo.deleted) {
+    console.log("here");
+  }
+
   const allTaskChanges = [
-    ...taskInfo.added.map((task) => ({ task, isModified: false })),
-    ...taskInfo.modified.map((task) => ({ task, isModified: true })),
+    ...(taskInfo.added ?? []).map((task) => ({ task, isModified: false })),
+    ...(taskInfo.modified ?? []).map((task) => ({ task, isModified: true })),
   ];
   for (const { task, isModified } of allTaskChanges) {
     const taskExtId = `proj${projectRecord.id}_task${task.row["Unit Number"]}`;
@@ -393,7 +483,21 @@ async function processAssignmentUpdates(
         "tslib-getRecords",
         sppAssignmentRequest,
       );
-      console.log("here");
+
+      if (assignmentRecords && assignmentRecords.length > 0) {
+        const deleteRequest = {
+          authObj: authObj,
+          recordType: "Projecttaskassign",
+          recordsToDelete: [assignmentRecords[0].id],
+        };
+
+        const deleteResponse = await callSharedUtil(
+          "tslib-deleteRecords",
+          deleteRequest,
+        );
+
+        console.log("here");
+      }
     }
   }
 
@@ -410,6 +514,54 @@ async function processAssignmentUpdates(
 
   for (const { assignment, isModified } of allAssignmentChanges) {
     const taskExtId = `proj${projectRecord.id}_task${assignment.row["Unit Number"]}`;
+    let idValue;
+    if (isModified) {
+      const identifier = assignment["Unit Number|Bid Role"];
+      const taskIdNumber = identifier.substring(0, identifier.indexOf("|"));
+      const userName = identifier.substring(
+        identifier.indexOf("|") + 1,
+        identifier.length,
+      );
+
+      const sppTaskRequest = {
+        authObj: authObj,
+        recordType: "Projecttask",
+        criteriaObj: {
+          projectid: projectRecord.id,
+          id_number: taskIdNumber,
+        },
+        limit: 1,
+      };
+      const taskRecords = await callSharedUtil(
+        "tslib-getRecords",
+        sppTaskRequest,
+      );
+
+      if (taskRecords && taskRecords.length > 0) {
+        const taskId = taskRecords[0].id;
+        const sppAssignmentRequest = {
+          authObj: authObj,
+          recordType: "Projecttaskassign",
+          criteriaObj: {
+            projecttaskid: taskId,
+            userid: {
+              value: userName,
+              lookupBy: "name",
+              inTable: "User",
+            },
+          },
+          limit: 1,
+        };
+        const assignmentRecords = await callSharedUtil(
+          "tslib-getRecords",
+          sppAssignmentRequest,
+        );
+
+        if (assignmentRecords && assignmentRecords.length > 0) {
+          idValue = assignmentRecords[0].id;
+        }
+      }
+    }
 
     const newAssignmentObj = {
       projectid: projectRecord.id,
@@ -436,6 +588,9 @@ async function processAssignmentUpdates(
       planned_hours: assignment.row["total hours"],
       assign_cost__c: assignment.row["Total Cost"],
       assign_bid__c: assignment.row["Total Bid"],
+      ...(isModified && {
+        id: idValue,
+      }),
     };
 
     assignmentObjArray.push(newAssignmentObj);
@@ -502,7 +657,7 @@ export const handler = async (event) => {
   };
   // check for initial load complete box checked -- projectRecord.fieldName. If checked then update, otherwise proceed normally
 
-  if (projectRecord.previousBidGridAttachmentId__c) {
+  /*if (projectRecord.previousBidGridAttachmentId__c) {
     await updateBidGridValues(
       base64,
       projectRecord,
@@ -563,6 +718,8 @@ export const handler = async (event) => {
       assignmentWriteRequest,
     );
   }
+*/
+  await calculateUnitPricePer(projectRecord.id);
 
   projectCalculations.proj_direct_gm_percent__c =
     projectCalculations.proj_directs__c !== 0
@@ -634,7 +791,7 @@ function accumulateProjectTotals(record, projectCalculations) {
 
 async function test() {
   const result = await handler({
-    body: '{"fileId":86}',
+    body: '{"fileId":103}',
   });
   console.log(JSON.stringify(result, null, 2));
 }

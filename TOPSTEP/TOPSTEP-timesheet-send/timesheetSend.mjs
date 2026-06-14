@@ -432,7 +432,7 @@ export const handler = async (event) => {
       const outputBuffer = await createSpreadsheet(
         userTasks,
         template.base64_data,
-        75,
+        user.id,
       );
 
       await sendTimesheetEmail({
@@ -479,6 +479,32 @@ export const handler = async (event) => {
       timeEntryWriteRequest,
     );
   } else if (eventBody.action === "validate") {
+    const timesheetReadObject = {
+      authObj: authObj,
+      recordType: "Timesheet",
+      criteriaObj: {
+        userid: eventBody.userId,
+        starts: eventBody.startDate,
+      },
+      limit: 1,
+    };
+    const timesheetReadResponse = await callSharedUtil(
+      "tslib-getRecords",
+      timesheetReadObject,
+    );
+
+    if (timesheetReadResponse.length === 0) {
+      eventBody.action = "receive";
+
+      await handler({ body: JSON.stringify(eventBody) });
+    } else {
+      const timesheetExists = {
+        statusCode: "422",
+        body: "A timesheet already exists for this user and week",
+      };
+
+      return timesheetExists;
+    }
   }
 
   const response = {
@@ -508,6 +534,14 @@ async function testReceive() {
   console.log(JSON.stringify(result, null, 2));
 }
 
+async function testValidate() {
+  const passedEvent = {
+    body: '{"action":"validate","userId":75,"startDate":"2026-06-14","rows":[{"date":"2026-06-15","customerId":"1090","projectId":"1480","taskId":"10424","hours":1,"notes":"abc"},{"date":"2026-06-16","customerId":"3150","projectId":"2166","taskId":"15099","hours":2,"notes":"def"}]}',
+  };
+  const result = await handler(passedEvent);
+  console.log(JSON.stringify(result, null, 2));
+}
+
 if (!process.env.AWS_LAMBDA_FUNCTION_NAME) {
-  testSend();
+  testValidate();
 }

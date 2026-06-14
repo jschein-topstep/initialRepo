@@ -15,6 +15,57 @@ const ssm = new SSMClient({});
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function buildReadXml(xmlCriteria, logs) {
+  const standardDateFields = [
+    "acct_date",
+    "approved",
+    "break_end",
+    "break_start",
+    "created",
+    "date",
+    "date_approved",
+    "date_end",
+    "date_expected",
+    "date_finalized",
+    "date_fulfilled",
+    "date_required",
+    "date_resolution_expected",
+    "date_resolution_required",
+    "date_shipped",
+    "date_start",
+    "date_submitted",
+    "draw_date",
+    "due",
+    "emailed",
+    "end",
+    "ends",
+    "end_date",
+    "enddate",
+    "endtime",
+    "expiration",
+    "expires",
+    "exported",
+    "finish_date",
+    "finished",
+    "fnlt_date",
+    "from_run",
+    "imported",
+    "occurred",
+    "papersend",
+    "period_date",
+    "sample_date",
+    "sent",
+    "start",
+    "start_date",
+    "startdate",
+    "starts",
+    "starttime",
+    "submitted",
+    "time_end",
+    "time_start",
+    "timer_start",
+    "updated",
+  ];
+
   const sbResponse = await ssm.send(
     new GetParameterCommand({
       Name: "/spp/sandboxKey",
@@ -54,6 +105,9 @@ async function buildReadXml(xmlCriteria, logs) {
       if (sppRecords && sppRecords.length > 0) {
         criteriaXML += `<${key}>${sppRecords[0][returnField]}</${key}>`;
       }
+    } else if (standardDateFields.indexOf(key) >= 0) {
+      // match date field
+      criteriaXML += `<${key}><Date><year>${value.substring(0, 4)}</year><month>${value.substring(5, 7)}</month><day>${value.substring(8, 10)}</day></Date></${key}>`;
     } else {
       criteriaXML += `<${key}>${value}</${key}>`;
     }
@@ -267,19 +321,15 @@ async function test0() {
 async function test1() {
   const result = await handler({
     authObj: {
-      company: "Tempus Sandbox",
+      company: "top step consulting llc",
       instance: "sandbox",
     },
-    recordType: "Projecttaskassign",
+    recordType: "Timesheet",
     criteriaObj: {
-      projecttaskid: 2881,
-      userid: {
-        value: "Sr. Data Manager",
-        lookupBy: "name",
-        inTable: "User",
-      },
+      userid: 75,
+      starts: "2026-06-21",
     },
-    limit: 1,
+    limit: 10,
   });
   console.log(JSON.stringify(result, null, 2));
 }

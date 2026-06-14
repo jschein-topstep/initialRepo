@@ -478,6 +478,7 @@ export const handler = async (event) => {
       "tslib-putRecords",
       timeEntryWriteRequest,
     );
+  } else if (eventBody.action === "validate") {
   }
 
   const response = {
@@ -493,100 +494,14 @@ export const handler = async (event) => {
 
 async function testSend() {
   const passedEvent = {
-    version: "2.0",
-    routeKey: "$default",
-    rawPath: "/",
-    rawQueryString: "",
-    headers: {
-      "content-length": "259",
-      "x-amzn-tls-version": "TLSv1.3",
-      "x-forwarded-proto": "https",
-      "accept-language": "en-us",
-      "x-forwarded-port": "443",
-      "x-forwarded-for": "136.32.176.156",
-      accept: "*/*",
-      "x-amzn-tls-cipher-suite": "TLS_AES_128_GCM_SHA256",
-      "x-amzn-trace-id": "Root=1-6a1865ee-2635f65676ca175309adbdf2",
-      "ua-cpu": "AMD64",
-      host: "eseisyd2naugpsnb7qntwnoyuq0monkf.lambda-url.us-east-2.on.aws",
-      "content-type": "application/json",
-      "cache-control": "no-cache",
-      "accept-encoding": "gzip, deflate",
-      "user-agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; Trident/7.0; rv:11.0) like Gecko",
-    },
-    requestContext: {
-      accountId: "anonymous",
-      apiId: "eseisyd2naugpsnb7qntwnoyuq0monkf",
-      domainName:
-        "eseisyd2naugpsnb7qntwnoyuq0monkf.lambda-url.us-east-2.on.aws",
-      domainPrefix: "eseisyd2naugpsnb7qntwnoyuq0monkf",
-      http: {
-        method: "POST",
-        path: "/",
-        protocol: "HTTP/1.1",
-        sourceIp: "136.32.176.156",
-        userAgent:
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64; Trident/7.0; rv:11.0) like Gecko",
-      },
-      requestId: "004d9de6-654f-4f27-9845-a880d02a767b",
-      routeKey: "$default",
-      stage: "$default",
-      time: "28/May/2026:15:57:34 +0000",
-      timeEpoch: 1779983854652,
-    },
     body: '{"action":"send"}',
-    isBase64Encoded: false,
   };
   const result = await handler(passedEvent);
   console.log(JSON.stringify(result, null, 2));
 }
 async function testReceive() {
   const passedEvent = {
-    version: "2.0",
-    routeKey: "$default",
-    rawPath: "/",
-    rawQueryString: "",
-    headers: {
-      "content-length": "259",
-      "x-amzn-tls-version": "TLSv1.3",
-      "x-forwarded-proto": "https",
-      "accept-language": "en-us",
-      "x-forwarded-port": "443",
-      "x-forwarded-for": "136.32.176.156",
-      accept: "*/*",
-      "x-amzn-tls-cipher-suite": "TLS_AES_128_GCM_SHA256",
-      "x-amzn-trace-id": "Root=1-6a1865ee-2635f65676ca175309adbdf2",
-      "ua-cpu": "AMD64",
-      host: "eseisyd2naugpsnb7qntwnoyuq0monkf.lambda-url.us-east-2.on.aws",
-      "content-type": "application/json",
-      "cache-control": "no-cache",
-      "accept-encoding": "gzip, deflate",
-      "user-agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; Trident/7.0; rv:11.0) like Gecko",
-    },
-    requestContext: {
-      accountId: "anonymous",
-      apiId: "eseisyd2naugpsnb7qntwnoyuq0monkf",
-      domainName:
-        "eseisyd2naugpsnb7qntwnoyuq0monkf.lambda-url.us-east-2.on.aws",
-      domainPrefix: "eseisyd2naugpsnb7qntwnoyuq0monkf",
-      http: {
-        method: "POST",
-        path: "/",
-        protocol: "HTTP/1.1",
-        sourceIp: "136.32.176.156",
-        userAgent:
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64; Trident/7.0; rv:11.0) like Gecko",
-      },
-      requestId: "004d9de6-654f-4f27-9845-a880d02a767b",
-      routeKey: "$default",
-      stage: "$default",
-      time: "28/May/2026:15:57:34 +0000",
-      timeEpoch: 1779983854652,
-    },
     body: '{"action":"receive","userId":"","rows":[{"date":"2026-05-31","customerId":"1090","projectId":"1480","taskId":"10424","hours":1,"notes":"abc"},{"date":"2026-05-31","customerId":"3150","projectId":"2166","taskId":"15099","hours":2,"notes":"def"}]}',
-    isBase64Encoded: false,
   };
 
   const result = await handler(passedEvent);

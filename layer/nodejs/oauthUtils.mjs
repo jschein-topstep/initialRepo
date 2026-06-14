@@ -11,13 +11,19 @@
  * Other exports used by the OAuth Lambda functions themselves.
  */
 
-import { DynamoDBClient, GetItemCommand, PutItemCommand } from "@aws-sdk/client-dynamodb";
+import {
+  DynamoDBClient,
+  GetItemCommand,
+  PutItemCommand,
+} from "@aws-sdk/client-dynamodb";
 import { marshall, unmarshall } from "@aws-sdk/util-dynamodb";
 
-const dynamo = new DynamoDBClient({ region: process.env.AWS_REGION || "us-east-1" });
+const dynamo = new DynamoDBClient({
+  region: process.env.AWS_REGION || "us-east-1",
+});
 
-const CONFIG_TABLE  = process.env.OAUTH_CONFIG_TABLE  || "oauth_config";
-const TOKENS_TABLE  = process.env.OAUTH_TOKENS_TABLE  || "oauth_tokens";
+const CONFIG_TABLE = process.env.OAUTH_CONFIG_TABLE || "oauth_config";
+const TOKENS_TABLE = process.env.OAUTH_TOKENS_TABLE || "oauth_tokens";
 
 /** Refresh this many seconds before actual expiry to avoid edge-case 401s */
 const EXPIRY_BUFFER_SECONDS = 60;
@@ -32,10 +38,12 @@ const EXPIRY_BUFFER_SECONDS = 60;
  * @returns {object} config row
  */
 export async function getOAuthConfig(integrationKey) {
-  const res = await dynamo.send(new GetItemCommand({
-    TableName: CONFIG_TABLE,
-    Key: marshall({ pk: integrationKey }),
-  }));
+  const res = await dynamo.send(
+    new GetItemCommand({
+      TableName: CONFIG_TABLE,
+      Key: marshall({ pk: integrationKey }),
+    }),
+  );
 
   if (!res.Item) {
     throw new Error(`No oauth_config found for key: ${integrationKey}`);
@@ -49,10 +57,12 @@ export async function getOAuthConfig(integrationKey) {
  * @returns {object|null}
  */
 export async function getStoredTokens(integrationKey) {
-  const res = await dynamo.send(new GetItemCommand({
-    TableName: TOKENS_TABLE,
-    Key: marshall({ pk: integrationKey }),
-  }));
+  const res = await dynamo.send(
+    new GetItemCommand({
+      TableName: TOKENS_TABLE,
+      Key: marshall({ pk: integrationKey }),
+    }),
+  );
   return res.Item ? unmarshall(res.Item) : null;
 }
 
@@ -66,13 +76,13 @@ export async function saveTokens(integrationKey, tokenData) {
   const expiresAt = now + (tokenData.expires_in || 3600);
 
   const item = {
-    pk:            integrationKey,
-    access_token:  tokenData.access_token,
-    token_type:    tokenData.token_type    || "Bearer",
-    scope:         tokenData.scope         || "",
-    expires_at:    expiresAt,
+    pk: integrationKey,
+    access_token: tokenData.access_token,
+    token_type: tokenData.token_type || "Bearer",
+    scope: tokenData.scope || "",
+    expires_at: expiresAt,
     // DynamoDB TTL — auto-delete row a day after expiry (optional safety net)
-    ttl:           expiresAt + 86400,
+    //ttl:           expiresAt + 86400,
   };
 
   // Only overwrite refresh_token if the provider returned a new one
@@ -87,10 +97,12 @@ export async function saveTokens(integrationKey, tokenData) {
     }
   }
 
-  await dynamo.send(new PutItemCommand({
-    TableName: TOKENS_TABLE,
-    Item: marshall(item),
-  }));
+  await dynamo.send(
+    new PutItemCommand({
+      TableName: TOKENS_TABLE,
+      Item: marshall(item),
+    }),
+  );
 
   return item;
 }
@@ -112,20 +124,22 @@ export async function refreshTokens(integrationKey) {
   ]);
 
   if (!stored?.refresh_token) {
-    throw new Error(`No refresh_token stored for: ${integrationKey}. Full re-authorization required.`);
+    throw new Error(
+      `No refresh_token stored for: ${integrationKey}. Full re-authorization required.`,
+    );
   }
 
   const params = new URLSearchParams({
-    grant_type:    "refresh_token",
+    grant_type: "refresh_token",
     refresh_token: stored.refresh_token,
-    client_id:     config.client_id,
+    client_id: config.client_id,
     client_secret: config.client_secret,
   });
 
   const response = await fetch(config.token_url, {
-    method:  "POST",
+    method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body:    params.toString(),
+    body: params.toString(),
   });
 
   if (!response.ok) {
@@ -157,14 +171,18 @@ export async function getValidAccessToken(integrationKey) {
   const stored = await getStoredTokens(integrationKey);
 
   if (!stored?.access_token) {
-    throw new Error(`No tokens stored for: ${integrationKey}. Authorization required.`);
+    throw new Error(
+      `No tokens stored for: ${integrationKey}. Authorization required.`,
+    );
   }
 
   const now = Math.floor(Date.now() / 1000);
   const isExpired = stored.expires_at <= now + EXPIRY_BUFFER_SECONDS;
 
   if (isExpired) {
-    console.log(`[oauthUtils] Token for "${integrationKey}" expired or near expiry — refreshing.`);
+    console.log(
+      `[oauthUtils] Token for "${integrationKey}" expired or near expiry — refreshing.`,
+    );
     const refreshed = await refreshTokens(integrationKey);
     return refreshed.access_token;
   }

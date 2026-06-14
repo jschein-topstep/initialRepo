@@ -9,8 +9,8 @@ const sharedPath = process.env.AWS_LAMBDA_FUNCTION_NAME
 const { callSharedUtil } = await import(sharedPath);
 
 const authObj = {
-  company: "top step",
-  instance: "prod",
+  company: "top step consulting llc",
+  instance: "sb",
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -166,6 +166,13 @@ function formatSheetDate(date) {
   const yyyy = date.getFullYear();
   return `${mm}-${dd}-${yyyy}`;
 }
+
+function formatISODate(date) {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
 /*
  * create initial Excel doc
  */
@@ -262,19 +269,31 @@ async function createSpreadsheet(taskData, template, userId) {
     .map(([r, cells]) => `<row r="${r}">${cells.join("")}</row>`)
     .join("");
 
+  const dataMaxRow = Math.max(
+    1,
+    customers.length + 1,
+    projects.length + 1,
+    tasks.length + 1,
+  );
+
   const dataSheetXml = await zip
     .file("xl/worksheets/sheet9.xml")
     .async("string");
-  const updatedDataXml = dataSheetXml.replace(
+  let updatedDataXml = dataSheetXml.replace(
+    /(<dimension ref=")[^"]*(")/,
+    `$1A1:M${dataMaxRow}$2`,
+  );
+  updatedDataXml = updatedDataXml.replace(
     /<sheetData\s*\/>|<sheetData>[\s\S]*?<\/sheetData>/,
     `<sheetData>${dataRows}</sheetData>`,
   );
   zip.file("xl/worksheets/sheet9.xml", updatedDataXml);
 
   // Rename sheets 2-8
+  const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   let workbookXml = await zip.file("xl/workbook.xml").async("string");
   days.forEach((date, i) => {
-    const sheetName = formatSheetDate(date);
+    const sheetName = `${dayNames[date.getDay()]}, ${formatSheetDate(date)}`;
     workbookXml = workbookXml.replace(
       new RegExp(`name="Sheet${i + 2}"`),
       `name="${sheetName}"`,
@@ -287,18 +306,33 @@ async function createSpreadsheet(taskData, template, userId) {
     let sheetXml = await zip
       .file(`xl/worksheets/sheet${i + 2}.xml`)
       .async("string");
-    sheetXml = sheetXml.replace(/(<dimension ref=")[^"]*(")/, `$1A2:J1000$2`);
+    sheetXml = sheetXml.replace(/(<dimension ref=")[^"]*(")/, `$1A1:J1000$2`);
 
-    // userId in fixed cell J2
+    // userId in fixed cell F2
     const existingRowsMatch = sheetXml.match(
       /<sheetData>([\s\S]*?)<\/sheetData>/,
     );
     const existingRows = existingRowsMatch ? existingRowsMatch[1] : "";
-    const userIdRow = `<row r="2"><c r="J2" t="str"><v>${escapeXml(String(userId))}</v></c></row>`;
+    const userIdRow = `<row r="2"><c r="F2" t="str"><v>${escapeXml(String(userId))}</v></c></row>`;
+
+    // Merge the userId row into sheetData while keeping rows in ascending r order
+    const rowMap = new Map();
+    const existingRowMatches = existingRows.matchAll(
+      /<row r="(\d+)"[^>]*(?:\/>|>[\s\S]*?<\/row>)/g,
+    );
+    for (const match of existingRowMatches) {
+      rowMap.set(Number(match[1]), match[0]);
+    }
+    rowMap.set(2, userIdRow);
+
+    const orderedRows = Array.from(rowMap.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([, rowXml]) => rowXml)
+      .join("");
 
     sheetXml = sheetXml.replace(
       /<sheetData\s*\/>|<sheetData>[\s\S]*?<\/sheetData>/,
-      `<sheetData>${userIdRow}${existingRows}</sheetData>`,
+      `<sheetData>${orderedRows}</sheetData>`,
     );
 
     // Named range validations pointing at Data sheet columns
@@ -309,7 +343,7 @@ async function createSpreadsheet(taskData, template, userId) {
     <dataValidation type="list" sqref="B4:B1000" showDropDown="0" showErrorMessage="1" errorTitle="Invalid Selection" error="Please select a project from the list.">
         <formula1>Data!$L$2:$L$1000</formula1>
     </dataValidation>
-    <dataValidation type="list" sqref="C4:C1000" showDropDown="0" showErrorMessage="1" errorTitle="Invalid Selection" error="Please select a task from the list.">
+    <dataValidation type="list" sqref="G4:G1000" showDropDown="0" showErrorMessage="1" errorTitle="Invalid Selection" error="Please select a task from the list.">
         <formula1>Data!$M$2:$M$1000</formula1>
     </dataValidation>
 </dataValidations>`;
@@ -337,8 +371,24 @@ async function createSpreadsheet(taskData, template, userId) {
     zip.file(`xl/worksheets/sheet${i + 2}.xml`, sheetXml);
   }
 
+  // Update title cell on Sheet1 with the date range covered by Sheet2 - Sheet8
+  let sheet1Xml = await zip.file("xl/worksheets/sheet1.xml").async("string");
+  const titleText = `Timesheet for the week of ${formatISODate(days[0])} through ${formatISODate(days[6])}`;
+  sheet1Xml = setCellValue(sheet1Xml, "A1", titleText);
+  zip.file("xl/worksheets/sheet1.xml", sheet1Xml);
+
   const outputBuffer = await zip.generateAsync({ type: "nodebuffer" });
   return outputBuffer;
+}
+
+function setCellValue(sheetXml, cellRef, value) {
+  const cellRegex = new RegExp(
+    `<c r="${cellRef}"((?:\\s+[^>]*?)?)(?:/>|>([\\s\\S]*?)</c>)`,
+  );
+  return sheetXml.replace(cellRegex, (match, attrs) => {
+    const cleanedAttrs = attrs.replace(/\s+t="[^"]*"/, "");
+    return `<c r="${cellRef}"${cleanedAttrs} t="str"><v>${escapeXml(String(value))}</v></c>`;
+  });
 }
 
 function escapeXml(str) {
@@ -364,7 +414,7 @@ export const handler = async (event) => {
       authObj: authObj,
       recordType: "Attachment",
       criteriaObj: {
-        id: 18206,
+        id: 17447,
       },
       limit: 1,
     };
@@ -382,7 +432,7 @@ export const handler = async (event) => {
       const outputBuffer = await createSpreadsheet(
         userTasks,
         template.base64_data,
-        36,
+        75,
       );
 
       await sendTimesheetEmail({
@@ -412,7 +462,7 @@ export const handler = async (event) => {
         projecttaskid: row.taskId,
         decimal_hours: row.hours,
         notes: row.notes,
-        userid: 36,
+        userid: 75,
         date: row.date,
       };
       writeObjArray.push(newWriteObj);

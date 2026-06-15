@@ -543,5 +543,5 @@ async function testValidate() {
 }
 
 if (!process.env.AWS_LAMBDA_FUNCTION_NAME) {
-  testValidate();
+  testSend();
 }

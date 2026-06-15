@@ -8,11 +8,6 @@ const sharedPath = process.env.AWS_LAMBDA_FUNCTION_NAME
   : "../../shared/sharedUtils.js";
 const { callSharedUtil } = await import(sharedPath);
 
-const authObj = {
-  company: "top step consulting llc",
-  instance: "sb",
-};
-
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /*
@@ -60,7 +55,7 @@ const sendTimesheetEmail = async ({
  * getUsers - pulls all users from SPP where sendTimesheet__c is checked
  */
 
-async function getUsers() {
+async function getUsers(authObj) {
   const sppUserRequest = {
     authObj: authObj,
     recordType: "User",
@@ -82,7 +77,7 @@ async function getUsers() {
  * getTasks - pulls all customer, project, and task names and ids that the provided user is assigned to
  */
 
-async function getTasks(userid) {
+async function getTasks(authObj, userid) {
   const sppAssignmentRequest = {
     authObj: authObj,
     recordType: "Projecttaskassign",
@@ -411,7 +406,7 @@ export const handler = async (event) => {
   let bodyText = "no action set";
   if (eventBody.action === "send") {
     const sppAttachmentRequest = {
-      authObj: authObj,
+      authObj: eventBody.authObj,
       recordType: "Attachment",
       criteriaObj: {
         id: 17447,
@@ -425,10 +420,10 @@ export const handler = async (event) => {
     );
     const template = templateRecords?.[0];
 
-    const usersToProcess = await getUsers();
+    const usersToProcess = await getUsers(eventBody.authObj);
     for (const user of usersToProcess) {
       const email = user.addr.Address.email;
-      const userTasks = await getTasks(user.id);
+      const userTasks = await getTasks(eventBody.authObj, user.id);
       const outputBuffer = await createSpreadsheet(
         userTasks,
         template.base64_data,
@@ -436,7 +431,7 @@ export const handler = async (event) => {
       );
 
       await sendTimesheetEmail({
-        toAddress: "jim@addolution.com",
+        toAddress: "ajackson@topstepllc.com",
         attachmentBuffer: outputBuffer,
         fileName: `timesheet.xlsm`,
       });
@@ -520,7 +515,7 @@ export const handler = async (event) => {
 
 async function testSend() {
   const passedEvent = {
-    body: '{"action":"send"}',
+    body: '{"action":"send","authObj":{"company":"top step consulting llc","instance":"sb"}}',
   };
   const result = await handler(passedEvent);
   console.log(JSON.stringify(result, null, 2));

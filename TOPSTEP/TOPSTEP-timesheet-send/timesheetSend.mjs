@@ -462,14 +462,14 @@ export const handler = async (event) => {
         projecttaskid: row.taskId,
         decimal_hours: row.hours,
         notes: row.notes,
-        userid: 75,
+        userid: eventBody.userId,
         date: row.date,
       };
       writeObjArray.push(newWriteObj);
     }
 
     const timeEntryWriteRequest = {
-      authObj: authObj,
+      authObj: eventBody.authObj,
       recordType: "Task",
       writeObj: writeObjArray,
     };
@@ -480,7 +480,7 @@ export const handler = async (event) => {
     );
   } else if (eventBody.action === "validate") {
     const timesheetReadObject = {
-      authObj: authObj,
+      authObj: eventBody.authObj,
       recordType: "Timesheet",
       criteriaObj: {
         userid: eventBody.userId,
@@ -527,7 +527,7 @@ async function testSend() {
 }
 async function testReceive() {
   const passedEvent = {
-    body: '{"action":"receive","userId":"","rows":[{"date":"2026-05-31","customerId":"1090","projectId":"1480","taskId":"10424","hours":1,"notes":"abc"},{"date":"2026-05-31","customerId":"3150","projectId":"2166","taskId":"15099","hours":2,"notes":"def"}]}',
+    body: '{"action":"receive","userId":"","authObj":{"company":"top step consulting llc","instance":"sb"},"rows":[{"date":"2026-05-31","customerId":"1090","projectId":"1480","taskId":"10424","hours":1,"notes":"abc"},{"date":"2026-05-31","customerId":"3150","projectId":"2166","taskId":"15099","hours":2,"notes":"def"}]}',
   };
 
   const result = await handler(passedEvent);
@@ -536,7 +536,7 @@ async function testReceive() {
 
 async function testValidate() {
   const passedEvent = {
-    body: '{"action":"validate","userId":75,"startDate":"2026-06-14","rows":[{"date":"2026-06-15","customerId":"1090","projectId":"1480","taskId":"10424","hours":1,"notes":"abc"},{"date":"2026-06-16","customerId":"3150","projectId":"2166","taskId":"15099","hours":2,"notes":"def"}]}',
+    body: '{"action":"validate","userId":75,"startDate":"2026-06-14","authObj":{"company":"top step consulting llc","instance":"sb"},"rows":[{"date":"2026-06-15","customerId":"1090","projectId":"1480","taskId":"10424","hours":1,"notes":"abc"},{"date":"2026-06-16","customerId":"3150","projectId":"2166","taskId":"15099","hours":2,"notes":"def"}]}',
   };
   const result = await handler(passedEvent);
   console.log(JSON.stringify(result, null, 2));

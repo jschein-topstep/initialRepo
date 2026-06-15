@@ -431,7 +431,7 @@ export const handler = async (event) => {
       );
 
       await sendTimesheetEmail({
-        toAddress: "ajackson@topstepllc.com",
+        toAddress: "jnschein@topstepllc.com",
         attachmentBuffer: outputBuffer,
         fileName: `timesheet.xlsm`,
       });

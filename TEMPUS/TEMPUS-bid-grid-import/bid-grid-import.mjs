@@ -127,7 +127,7 @@ async function newBidGridLoad(
         fileLines[i]["Total Bid"],
       );
       matchingTaskObject.unit_price_per__c =
-        matchingTaskObjects.number_units__c != 0
+        matchingTaskObject.number_units__c != 0
           ? matchingTaskObject.unit_total_bid__c /
             matchingTaskObject.number_units__c
           : 0;
@@ -180,7 +180,7 @@ async function newBidGridLoad(
           lookupBy: "externalid",
           inTable: "Projecttask",
         },
-        projectid: projId,
+        projectid: projectRecord.id,
         rate_from: "U",
       },
     };
@@ -278,7 +278,7 @@ async function calculateUnitPricePer(projId) {
         writeObj: {
           categoryid: taskRecord.default_category,
           userid: 251,
-          rate: taskRecord.unit_price_per__c, //unitPrice,
+          rate: unitPrice,
           project_billing_ruleid: billingRuleUpdate.id,
         },
       };
@@ -462,7 +462,7 @@ async function processTaskUpdates(projectRecord, taskInfo, taskObjArray) {
         inTable: "Projecttask",
       },
       unit_budget_cat__c: task.row["Budget Category"],
-      service: {
+      default_category: {
         value: task.row["Revenue Account"],
         lookupBy: "name",
         inTable: "Category",
@@ -677,6 +677,8 @@ export const handler = async (event) => {
   const phaseObjArray = [];
   const taskObjArray = [];
   const assignmentObjArray = [];
+  const billingRuleObjArray = [];
+  const uprateObjArray = [];
 
   const inflationPlusDiscount =
     parseFloat(projectRecord.proj_inflation__c) +
@@ -711,6 +713,8 @@ export const handler = async (event) => {
       phaseObjArray,
       taskObjArray,
       assignmentObjArray,
+      billingRuleObjArray,
+      uprateObjArray,
     );
   } else {
     await newBidGridLoad(
@@ -720,6 +724,8 @@ export const handler = async (event) => {
       phaseObjArray,
       taskObjArray,
       assignmentObjArray,
+      billingRuleObjArray,
+      uprateObjArray,
     );
   }
 
@@ -762,6 +768,34 @@ export const handler = async (event) => {
     const assignmentWriteResponse = await callSharedUtil(
       "tslib-putRecords",
       assignmentWriteRequest,
+    );
+  }
+
+  // create billing rules
+  if (billingRuleObjArray.length > 0) {
+    const billingRuleWriteRequest = {
+      authObj: authObj,
+      recordType: "Projectbillingrule",
+      writeObj: billingRuleObjArray,
+    };
+
+    const billingRuleWriteResponse = await callSharedUtil(
+      "tslib-putRecords",
+      billingRuleWriteRequest,
+    );
+  }
+
+  // create uprates
+  if (uprateObjArray.length > 0) {
+    const uprateWriteRequest = {
+      authObj: authObj,
+      recordType: "Uprate",
+      writeObj: uprateObjArray,
+    };
+
+    const uprateWriteResponse = await callSharedUtil(
+      "tslib-putRecords",
+      uprateWriteRequest,
     );
   }
 
@@ -837,7 +871,7 @@ function accumulateProjectTotals(record, projectCalculations) {
 
 async function test() {
   const result = await handler({
-    body: '{"fileId":108}',
+    body: '{"fileId":110}',
   });
   console.log(JSON.stringify(result, null, 2));
 }

@@ -49,7 +49,7 @@ async function buildUpsertXml(criteria, logs) {
         action = "Modify";
       }
 
-      if (typeof writeObj[key] === "object") {
+      if (writeObj[key] !== null && typeof writeObj[key] === "object") {
         const value = writeObj[key].value;
         const lookupBy = writeObj[key].lookupBy;
         const inTable = writeObj[key].inTable;

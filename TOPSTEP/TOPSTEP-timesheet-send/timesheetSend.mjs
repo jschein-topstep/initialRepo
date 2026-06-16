@@ -63,7 +63,7 @@ async function getUsers(authObj) {
       sendTimesheet__c: 1,
     },
     limit: 1000,
-    fields: "id,addr",
+    fields: "id,name,addr",
   };
 
   const userRecords = await callSharedUtil("tslib-getRecords", sppUserRequest);
@@ -169,14 +169,50 @@ function formatISODate(date) {
   return `${yyyy}-${mm}-${dd}`;
 }
 /*
+ * add bold Calibri 12pt style to xl/styles.xml; returns the new cellXfs index
+ */
+
+async function buildHeaderStyle(zip) {
+  let xml = await zip.file("xl/styles.xml").async("string");
+
+  const fontIndex = (xml.match(/<font[\s>]/g) || []).length;
+  xml = xml
+    .replace(
+      "</fonts>",
+      `<font><b/><sz val="12"/><name val="Calibri"/></font></fonts>`,
+    )
+    .replace(
+      /(<fonts[^>]+count=")(\d+)(")/,
+      (_, a, n, b) => `${a}${+n + 1}${b}`,
+    );
+
+  const xfsBefore = xml.match(/<cellXfs[^>]*>([\s\S]*?)<\/cellXfs>/)?.[1] ?? "";
+  const styleIndex = (xfsBefore.match(/<xf /g) || []).length;
+  xml = xml
+    .replace(
+      "</cellXfs>",
+      `<xf numFmtId="0" fontId="${fontIndex}" fillId="0" borderId="0" applyFont="1"/></cellXfs>`,
+    )
+    .replace(
+      /(<cellXfs[^>]+count=")(\d+)(")/,
+      (_, a, n, b) => `${a}${+n + 1}${b}`,
+    );
+
+  zip.file("xl/styles.xml", xml);
+  return styleIndex;
+}
+
+/*
  * create initial Excel doc
  */
 
-async function createSpreadsheet(taskData, template, userId) {
+async function createSpreadsheet(taskData, template, userId, userName = "") {
   const buffer = Buffer.from(template, "base64");
   const zip = await JSZip.loadAsync(buffer);
   const contentTypes = await zip.file("[Content_Types].xml").async("string");
   console.log("Content Types:", contentTypes);
+
+  const headerStyleIndex = await buildHeaderStyle(zip);
 
   const sunday = getNextSunday();
   const days = Array.from({ length: 7 }, (_, i) => {
@@ -318,6 +354,26 @@ async function createSpreadsheet(taskData, template, userId) {
     for (const match of existingRowMatches) {
       rowMap.set(Number(match[1]), match[0]);
     }
+
+    // Inject A1 header into row 1
+    const dayName = dayNames[days[i].getDay()];
+    const title = `Timesheet for ${dayName}, ${formatSheetDate(days[i])}${userName ? ` — ${userName}` : ""}`;
+    const titleCell = `<c r="A1" t="str" s="${headerStyleIndex}"><v>${escapeXml(title)}</v></c>`;
+    if (rowMap.has(1)) {
+      let row1 = rowMap.get(1);
+      if (/<c r="A1"/.test(row1)) {
+        row1 = row1.replace(
+          /<c r="A1"((?:\s+[^>]*?)?)(?:\/>|>[\s\S]*?<\/c>)/,
+          titleCell,
+        );
+      } else {
+        row1 = row1.replace(/(<row r="1"[^>]*>)/, `$1${titleCell}`);
+      }
+      rowMap.set(1, row1);
+    } else {
+      rowMap.set(1, `<row r="1">${titleCell}</row>`);
+    }
+
     rowMap.set(2, userIdRow);
 
     const orderedRows = Array.from(rowMap.entries())
@@ -428,10 +484,12 @@ export const handler = async (event) => {
         userTasks,
         template.base64_data,
         user.id,
+        user.name,
       );
 
       await sendTimesheetEmail({
-        toAddress: "jnschein@topstepllc.com",
+        //toAddress: "ccooper@paladinmgmt.com",
+        toAddress: "jschein@topstepllc.com",
         attachmentBuffer: outputBuffer,
         fileName: `timesheet.xlsm`,
       });
@@ -515,7 +573,7 @@ export const handler = async (event) => {
 
 async function testSend() {
   const passedEvent = {
-    body: '{"action":"send","authObj":{"company":"top step consulting llc","instance":"sb"}}',
+    body: '{"action":"send","authObj":{"company":"11593134 Paladin Management Group","user":"admin","password":"SpringSPP2026!","instance":"sb"}}',
   };
   const result = await handler(passedEvent);
   console.log(JSON.stringify(result, null, 2));

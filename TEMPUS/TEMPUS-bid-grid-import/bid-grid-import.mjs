@@ -64,8 +64,6 @@ async function newBidGridLoad(
   phaseObjArray,
   taskObjArray,
   assignmentObjArray,
-  billingRuleObjArray,
-  uprateObjArray,
 ) {
   const deleteResponse = await deleteExistingTasks(projectRecord.id);
 
@@ -113,8 +111,8 @@ async function newBidGridLoad(
           },
           id_number: fileLines[i]["Unit Number"],
           unit_basis__c: fileLines[i]["Unit Basis"],
-          number_units__c: parseFloat(fileLines[i]["# of Units"]),
-          unit_total_bid__c: 0,
+          number_units__c: fileLines[i]["# of Units"],
+
           projecttask_typeid: 2,
           externalid: taskExtId,
         };
@@ -122,15 +120,6 @@ async function newBidGridLoad(
         taskObjArray.push(newTaskObj);
         matchingTaskObject = newTaskObj;
       }
-
-      matchingTaskObject.unit_total_bid__c += parseFloat(
-        fileLines[i]["Total Bid"],
-      );
-      matchingTaskObject.unit_price_per__c =
-        matchingTaskObject.number_units__c != 0
-          ? matchingTaskObject.unit_total_bid__c /
-            matchingTaskObject.number_units__c
-          : 0;
 
       const newAssignmentObj = {
         projectid: projectRecord.id,
@@ -164,44 +153,6 @@ async function newBidGridLoad(
       accumulateProjectTotals(fileLines[i], projectCalculations);
     }
   }
-
-  for (const task of taskObjArray) {
-    const billingRuleDetails = {
-      authObj: authObj,
-      recordType: "Projectbillingrule",
-      writeObj: {
-        active: 1,
-        type: "T",
-        categoryid: task.default_category,
-        name: `Billing rule for ${task.name}`,
-        task_external_id__c: task.externalid,
-        project_task_filter: {
-          value: task.externalid,
-          lookupBy: "externalid",
-          inTable: "Projecttask",
-        },
-        projectid: projectRecord.id,
-        rate_from: "U",
-      },
-    };
-
-    billingRuleObjArray.push(billingRuleDetails);
-
-    const uprateDetails = {
-      authObj: authObj,
-      recordType: "Uprate",
-      writeObj: {
-        categoryid: task.default_category,
-        userid: 251,
-        rate: task.unit_price_per__c,
-        project_billing_ruleid: {
-          value: task.externalid,
-          lookupBy: "task_external_id__c",
-          inTable: "Projectbillingrule",
-        },
-      },
-    };
-  }
 }
 
 async function calculateUnitPricePer(projId) {
@@ -216,7 +167,7 @@ async function calculateUnitPricePer(projId) {
   const taskRecords = await callSharedUtil("tslib-getRecords", sppTaskRequest);
 
   for (const taskRecord of taskRecords) {
-    if (taskRecord.is_a_phase != 1 && !taskRecord.unit_price_per__c) {
+    if (taskRecord.is_a_phase != 1) {
       const sppAssignmentRequest = {
         authObj: authObj,
         recordType: "Projecttaskassign",
@@ -278,7 +229,7 @@ async function calculateUnitPricePer(projId) {
         writeObj: {
           categoryid: taskRecord.default_category,
           userid: 251,
-          rate: unitPrice,
+          rate: taskRecord.unit_price_per__c, //unitPrice,
           project_billing_ruleid: billingRuleUpdate.id,
         },
       };
@@ -366,7 +317,7 @@ async function updateBidGridValues(
         inTable: "Projecttask",
       },
       unit_budget_cat__c: fileLines[i]["Budget Category"],
-      service: {
+      default_category: {
         value: fileLines[i]["Revenue Account"],
         lookupBy: "name",
         inTable: "Category",
@@ -677,8 +628,6 @@ export const handler = async (event) => {
   const phaseObjArray = [];
   const taskObjArray = [];
   const assignmentObjArray = [];
-  const billingRuleObjArray = [];
-  const uprateObjArray = [];
 
   const inflationPlusDiscount =
     parseFloat(projectRecord.proj_inflation__c) +
@@ -713,8 +662,6 @@ export const handler = async (event) => {
       phaseObjArray,
       taskObjArray,
       assignmentObjArray,
-      billingRuleObjArray,
-      uprateObjArray,
     );
   } else {
     await newBidGridLoad(
@@ -724,8 +671,6 @@ export const handler = async (event) => {
       phaseObjArray,
       taskObjArray,
       assignmentObjArray,
-      billingRuleObjArray,
-      uprateObjArray,
     );
   }
 
@@ -771,33 +716,7 @@ export const handler = async (event) => {
     );
   }
 
-  // create billing rules
-  if (billingRuleObjArray.length > 0) {
-    const billingRuleWriteRequest = {
-      authObj: authObj,
-      recordType: "Projectbillingrule",
-      writeObj: billingRuleObjArray,
-    };
-
-    const billingRuleWriteResponse = await callSharedUtil(
-      "tslib-putRecords",
-      billingRuleWriteRequest,
-    );
-  }
-
-  // create uprates
-  if (uprateObjArray.length > 0) {
-    const uprateWriteRequest = {
-      authObj: authObj,
-      recordType: "Uprate",
-      writeObj: uprateObjArray,
-    };
-
-    const uprateWriteResponse = await callSharedUtil(
-      "tslib-putRecords",
-      uprateWriteRequest,
-    );
-  }
+  await calculateUnitPricePer(projectRecord.id);
 
   projectCalculations.proj_direct_gm_percent__c =
     projectCalculations.proj_directs__c !== 0
@@ -821,8 +740,6 @@ export const handler = async (event) => {
     "tslib-putRecords",
     projectUpdateDetails,
   );
-
-  await calculateUnitPricePer(projectRecord.id);
 };
 
 function accumulateProjectTotals(record, projectCalculations) {
@@ -871,7 +788,7 @@ function accumulateProjectTotals(record, projectCalculations) {
 
 async function test() {
   const result = await handler({
-    body: '{"fileId":110}',
+    body: '{"fileId":103}',
   });
   console.log(JSON.stringify(result, null, 2));
 }

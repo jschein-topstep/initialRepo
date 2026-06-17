@@ -465,7 +465,7 @@ export const handler = async (event) => {
       authObj: eventBody.authObj,
       recordType: "Attachment",
       criteriaObj: {
-        id: 17447,
+        id: 4,
       },
       limit: 1,
     };
@@ -488,8 +488,9 @@ export const handler = async (event) => {
       );
 
       await sendTimesheetEmail({
-        //toAddress: "ccooper@paladinmgmt.com",
-        toAddress: "jschein@topstepllc.com",
+        toAddress:
+          "roxanna@paladinmgmt.com, jschein@topstepllc.com, ccooper@paladinmgmt.com",
+        //toAddress: "jschein@topstepllc.com",
         attachmentBuffer: outputBuffer,
         fileName: `timesheet.xlsm`,
       });

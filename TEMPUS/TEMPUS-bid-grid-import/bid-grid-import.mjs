@@ -180,22 +180,25 @@ async function calculateUnitPricePer(projId) {
         "tslib-getRecords",
         sppAssignmentRequest,
       );
-      let assignmentTotal = 0;
+      let assignmentBidTotal = 0;
+      let assignmentCostTotal = 0;
       for (const assignmentRecord of assignmentRecords) {
-        assignmentTotal += parseFloat(assignmentRecord.assign_bid__c);
+        assignmentBidTotal += parseFloat(assignmentRecord.assign_bid__c);
+        assignmentCostTotal += parseFloat(assignmentRecord.assign_cost__c);
       }
 
       const unitPrice =
         taskRecord.number_units__c !== 0
-          ? assignmentTotal / taskRecord.number_units__c
+          ? assignmentBidTotal / taskRecord.number_units__c
           : 0;
       const taskUpdateDetails = {
         authObj: authObj,
         recordType: "Projecttask",
         writeObj: {
           id: taskRecord.id,
-          unit_total_bid__c: assignmentTotal,
+          unit_total_bid__c: assignmentBidTotal,
           unit_price_per__c: unitPrice,
+          unit_total_cost__c: assignmentCostTotal,
         },
       };
 
@@ -229,7 +232,7 @@ async function calculateUnitPricePer(projId) {
         writeObj: {
           categoryid: taskRecord.default_category,
           userid: 251,
-          rate: taskRecord.unit_price_per__c, //unitPrice,
+          rate: unitPrice,
           project_billing_ruleid: billingRuleUpdate.id,
         },
       };
@@ -239,6 +242,7 @@ async function calculateUnitPricePer(projId) {
   }
 }
 async function updateBidGridValues(
+  fileLines,
   newCsv,
   projectRecord,
   projectCalculations,
@@ -300,68 +304,9 @@ async function updateBidGridValues(
     assignmentObjArray,
   );
 
-  let matchingTaskObject = taskObjArray.find(
-    (task) => task.name === fileLines[i]["Unit Name"],
-  );
-
-  if (matchingTaskObject === undefined) {
-    // the task has not been encountered yet
-    const taskExtId = `proj${projectRecord.id}_task${taskObjArray.length}`;
-    const newTaskObj = {
-      projectid: projectRecord.id,
-      name: fileLines[i]["Unit Name"],
-      is_a_phase: "",
-      parentid: {
-        value: matchingPhaseObject.externalid,
-        lookupBy: "externalid",
-        inTable: "Projecttask",
-      },
-      unit_budget_cat__c: fileLines[i]["Budget Category"],
-      default_category: {
-        value: fileLines[i]["Revenue Account"],
-        lookupBy: "name",
-        inTable: "Category",
-      },
-      id_number: fileLines[i]["Unit Number"],
-      unit_basis__c: fileLines[i]["Unit Basis"],
-      number_units__c: fileLines[i]["# of Units"],
-      externalid: taskExtId,
-    };
-
-    taskObjArray.push(newTaskObj);
-    matchingTaskObject = newTaskObj;
+  for (let i = 0; i < fileLines.length; i++) {
+    accumulateProjectTotals(fileLines[i], projectCalculations);
   }
-
-  const newAssignmentObj = {
-    projectid: projectRecord.id,
-    projecttaskid: {
-      value: matchingTaskObject.externalid,
-      lookupBy: "externalid",
-      inTable: "Projecttask",
-    },
-    costCenter: {
-      value: fileLines[i]["Team"],
-      lookupBy: "name",
-      inTable: "Costcenter",
-    },
-    assign_functional_area__c: {
-      value: fileLines[i]["Functional Area"],
-      lookupBy: "name",
-      inTable: "Department",
-    },
-    userid: {
-      value: fileLines[i]["Bid Role"],
-      lookupBy: "name",
-      inTable: "User",
-    },
-    planned_hours: fileLines[i]["total hours"],
-    assign_cost__c: fileLines[i]["Total Cost"],
-    assign_bid__c: fileLines[i]["Total Bid"],
-  };
-
-  assignmentObjArray.push(newAssignmentObj);
-
-  accumulateProjectTotals(fileLines[i], projectCalculations);
 }
 
 async function processPhaseUpdates(projectRecord, phaseInfo, phaseObjArray) {
@@ -656,6 +601,7 @@ export const handler = async (event) => {
 
   if (projectRecord.previousBidGridAttachmentId__c) {
     await updateBidGridValues(
+      fileLines,
       base64,
       projectRecord,
       projectCalculations,
@@ -716,7 +662,10 @@ export const handler = async (event) => {
     );
   }
 
-  await calculateUnitPricePer(projectRecord.id);
+  // only run on original load
+  if (!projectRecord.previousBidGridAttachmentId__c) {
+    await calculateUnitPricePer(projectRecord.id);
+  }
 
   projectCalculations.proj_direct_gm_percent__c =
     projectCalculations.proj_directs__c !== 0
@@ -788,7 +737,7 @@ function accumulateProjectTotals(record, projectCalculations) {
 
 async function test() {
   const result = await handler({
-    body: '{"fileId":103}',
+    body: '{"fileId":111}',
   });
   console.log(JSON.stringify(result, null, 2));
 }

@@ -98,6 +98,11 @@ async function newBidGridLoad(
           projectid: projectRecord.id,
           name: fileLines[i]["Unit Name"],
           is_a_phase: "",
+          cost_centerid: {
+            value: fileLines[i]["Team"],
+            lookupBy: "name",
+            inTable: "Costcenter",
+          },
           parentid: {
             value: matchingPhaseObject.externalid,
             lookupBy: "externalid",
@@ -112,7 +117,8 @@ async function newBidGridLoad(
           id_number: fileLines[i]["Unit Number"],
           unit_basis__c: fileLines[i]["Unit Basis"],
           number_units__c: fileLines[i]["# of Units"],
-
+          unit_total_cost__c: fileLines[i]["Total Cost"], // will get overridden if there are task assignments
+          unit_total_bid__c: fileLines[i]["Total Bid"], // will geet overridden if there are task assignments
           projecttask_typeid: 2,
           externalid: taskExtId,
         };
@@ -127,11 +133,6 @@ async function newBidGridLoad(
           value: matchingTaskObject.externalid,
           lookupBy: "externalid",
           inTable: "Projecttask",
-        },
-        costCenter: {
-          value: fileLines[i]["Team"],
-          lookupBy: "name",
-          inTable: "Costcenter",
         },
         assign_functional_area__c: {
           value: fileLines[i]["Functional Area"],
@@ -241,6 +242,36 @@ async function calculateUnitPricePer(projId) {
     }
   }
 }
+
+async function getSPPRecordFromStore(dataStore, searchObject) {
+  const searchObjectEntries = Object.entries(searchObject);
+  let dataStoreRecord = dataStore.find((storedInfo) =>
+    searchObjectEntries.every(([k, v]) => storedInfo[k] === v),
+  );
+
+  if (!dataStoreRecord) {
+    const { recordType: searchObjectType, ...searchObjectWithoutType } =
+      searchObject;
+    const sppRequest = {
+      authObj: authObj,
+      recordType: searchObjectType,
+      criteriaObj: searchObjectWithoutType,
+      limit: 1,
+    };
+
+    const sppResponse = await callSharedUtil("tslib-getRecords", sppRequest);
+
+    if (sppResponse.length === 1) {
+      dataStoreRecord = {
+        recordType: searchObjectType,
+        ...sppResponse[0],
+      };
+      dataStore.push(dataStoreRecord);
+    }
+  }
+  return dataStoreRecord;
+}
+
 async function updateBidGridValues(
   fileLines,
   newCsv,
@@ -250,10 +281,101 @@ async function updateBidGridValues(
   taskObjArray,
   assignmentObjArray,
 ) {
-  const previousFileRaw = await getAttachment(
-    projectRecord.previousBidGridAttachmentId__c,
-  );
-  const originalCsv = atob(previousFileRaw.base64_data);
+  const dataStore = [];
+
+  let originalCsv =
+    "Project ID,Budget Category,Revenue Account,Team,Functional Area,Tab,Header,Unit Number,Unit Name,Unit Basis,# of Units,Bid Role,total hours,Total Cost,Total Bid\r\n";
+  const sppTaskRequest = {
+    authObj: authObj,
+    recordType: "Projecttask",
+    criteriaObj: {
+      projectid: projectRecord.id,
+    },
+    limit: 1000,
+  };
+  const taskRecords = await callSharedUtil("tslib-getRecords", sppTaskRequest);
+
+  for (const task of taskRecords) {
+    const categoryRecord = await getSPPRecordFromStore(dataStore, {
+      recordType: "Category",
+      id: task.default_category,
+    });
+    const costCenterRecord = await getSPPRecordFromStore(dataStore, {
+      recordType: "Costcenter",
+      id: task.cost_centerid,
+    });
+    const phaseRecord = await getSPPRecordFromStore(dataStore, {
+      recordType: "Projecttask",
+      id: task.parentid,
+    });
+
+    const sppAssignmentRequest = {
+      authObj: authObj,
+      recordType: "Projecttaskassign",
+      criteriaObj: {
+        projecttaskid: task.id,
+      },
+      limit: 1000,
+    };
+    const assignmentRecords = await callSharedUtil(
+      "tslib-getRecords",
+      sppAssignmentRequest,
+    );
+
+    if (assignmentRecords?.length > 0) {
+      for (const assignment of assignmentRecords) {
+        const departmentRecord = await getSPPRecordFromStore(dataStore, {
+          recordType: "Department",
+          id: assignment.assign_functional_area__c,
+        });
+        const userRecord = await getSPPRecordFromStore(dataStore, {
+          recordType: "User",
+          id: assignment.userid,
+        });
+
+        const field = [];
+        field[0] = projectRecord.name; // Project ID
+        field[1] = task.unit_budget_cat__c; // Budget Category
+        field[2] = categoryRecord.name; // Revenue Account
+        field[3] = costCenterRecord.name; // Team
+        field[4] = departmentRecord.name; // Functional Area
+        field[5] = 1; // Tab
+        field[6] = phaseRecord.name; // Header
+        field[7] = task.id_number; // Unit Number
+        field[8] = task.name; // Unit Name
+        field[9] = task.unit_basis__c; // Unit Basis
+        field[10] = task.number_units__c; // # of Units
+        field[11] = userRecord.name; // Bid Role
+        field[12] = assignment.planned_hours; // total hours
+        field[13] = assignment.assign_cost__c; // Total Cost
+        field[14] = assignment.assign_bid__c; // Total Bid
+        field[15] = "\r\n";
+
+        originalCsv += field.join(",");
+      }
+    } else {
+      // no task assignments
+      const field = [];
+      field[0] = projectRecord.name; // Project ID
+      field[1] = task.unit_budget_cat__c; // Budget Category
+      field[2] = categoryRecord.name; // Revenue Account
+      field[3] = costCenterRecord.name; // Team
+      field[4] = departmentRecord.name; // Functional Area
+      field[5] = 1; // Tab
+      field[6] = phaseRecord.name; // Header
+      field[7] = task.id_number; // Unit Number
+      field[8] = task.name; // Unit Name
+      field[9] = task.unit_basis__c; // Unit Basis
+      field[10] = task.number_units__c; // # of Units
+      field[11] = ""; // Bid Role -- blank because no assignment
+      field[12] = ""; // total hours -- blank because no assignment
+      field[13] = task.unit_total_cost__c; // Total Cost from Task
+      field[14] = task.unit_total_bid__c; // Total Bid from Task
+      field[15] = "\r\n";
+
+      originalCsv += field.join(",");
+    }
+  }
 
   const fieldDefinitions = [
     {
@@ -264,6 +386,7 @@ async function updateBidGridValues(
     {
       entity: "Projecttask",
       fields: [
+        "Team",
         "Budget Category",
         "Revenue Account",
         "Unit Name",
@@ -274,16 +397,19 @@ async function updateBidGridValues(
     },
     {
       entity: "Projecttaskassign",
-      fields: [
-        "Team",
-        "Functional Area",
-        "Total Hours",
-        "Total Cost",
-        "Total Bid",
-      ],
+      fields: ["Functional Area", "Total Hours", "Total Cost", "Total Bid"],
       key: ["Unit Number", "Bid Role"],
     },
   ];
+
+  const origSnippet = originalCsv.substring(
+    originalCsv.indexOf("F2F Meetings") - 200,
+    originalCsv.indexOf("F2F Meetings") + 200,
+  );
+  const newSnippet = newCsv.substring(
+    newCsv.indexOf("F2F Meetings") - 200,
+    newCsv.indexOf("F2F Meetings") + 200,
+  );
 
   const diffResults = await callSharedUtil("tslib-csvDiff", {
     originalCsv,
@@ -352,6 +478,11 @@ async function processTaskUpdates(projectRecord, taskInfo, taskObjArray) {
     const newTaskObj = {
       projectid: projectRecord.id,
       name: task.row["Unit Name"],
+      cost_centerid: {
+        value: task.row["Team"],
+        lookupBy: "name",
+        inTable: "Costcenter",
+      },
       parentid: {
         value: phaseExtId,
         lookupBy: "externalid",
@@ -511,11 +642,6 @@ async function processAssignmentUpdates(
         value: taskExtId,
         lookupBy: "externalid",
         inTable: "Projecttask",
-      },
-      costCenter: {
-        value: assignment.row["Team"],
-        lookupBy: "name",
-        inTable: "Costcenter",
       },
       assign_functional_area__c: {
         value: assignment.row["Functional Area"],
@@ -737,7 +863,7 @@ function accumulateProjectTotals(record, projectCalculations) {
 
 async function test() {
   const result = await handler({
-    body: '{"fileId":111}',
+    body: '{"fileId":110}',
   });
   console.log(JSON.stringify(result, null, 2));
 }

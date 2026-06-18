@@ -171,6 +171,7 @@ export const handler = async (event) => {
       ? sbUrl
       : prodUrl;
 
+    logs.push(`sppUrl: ${sppUrl}`);
     const response = await fetch(sppUrl, {
       method: "POST",
       headers: {

@@ -127,29 +127,31 @@ async function newBidGridLoad(
         matchingTaskObject = newTaskObj;
       }
 
-      const newAssignmentObj = {
-        projectid: projectRecord.id,
-        projecttaskid: {
-          value: matchingTaskObject.externalid,
-          lookupBy: "externalid",
-          inTable: "Projecttask",
-        },
-        assign_functional_area__c: {
-          value: fileLines[i]["Functional Area"],
-          lookupBy: "name",
-          inTable: "Department",
-        },
-        userid: {
-          value: fileLines[i]["Bid Role"],
-          lookupBy: "name",
-          inTable: "User",
-        },
-        planned_hours: fileLines[i]["total hours"],
-        assign_cost__c: fileLines[i]["Total Cost"],
-        assign_bid__c: fileLines[i]["Total Bid"],
-      };
+      if (fileLines[i]["Bid Role"]) {
+        const newAssignmentObj = {
+          projectid: projectRecord.id,
+          projecttaskid: {
+            value: matchingTaskObject.externalid,
+            lookupBy: "externalid",
+            inTable: "Projecttask",
+          },
+          assign_functional_area__c: {
+            value: fileLines[i]["Functional Area"],
+            lookupBy: "name",
+            inTable: "Department",
+          },
+          userid: {
+            value: fileLines[i]["Bid Role"],
+            lookupBy: "name",
+            inTable: "User",
+          },
+          planned_hours: fileLines[i]["total hours"],
+          assign_cost__c: fileLines[i]["Total Cost"],
+          assign_bid__c: fileLines[i]["Total Bid"],
+        };
 
-      assignmentObjArray.push(newAssignmentObj);
+        assignmentObjArray.push(newAssignmentObj);
+      }
 
       accumulateProjectTotals(fileLines[i], projectCalculations);
     }
@@ -181,11 +183,18 @@ async function calculateUnitPricePer(projId) {
         "tslib-getRecords",
         sppAssignmentRequest,
       );
+
       let assignmentBidTotal = 0;
       let assignmentCostTotal = 0;
-      for (const assignmentRecord of assignmentRecords) {
-        assignmentBidTotal += parseFloat(assignmentRecord.assign_bid__c);
-        assignmentCostTotal += parseFloat(assignmentRecord.assign_cost__c);
+
+      if (assignmentRecords?.length > 0) {
+        for (const assignmentRecord of assignmentRecords) {
+          assignmentBidTotal += parseFloat(assignmentRecord.assign_bid__c);
+          assignmentCostTotal += parseFloat(assignmentRecord.assign_cost__c);
+        }
+      } else {
+        assignmentBidTotal = taskRecord.unit_total_bid__c;
+        assignmentCostTotal = taskRecord.unit_total_cost__c;
       }
 
       const unitPrice =
@@ -863,7 +872,7 @@ function accumulateProjectTotals(record, projectCalculations) {
 
 async function test() {
   const result = await handler({
-    body: '{"fileId":110}',
+    body: '{"fileId":111}',
   });
   console.log(JSON.stringify(result, null, 2));
 }

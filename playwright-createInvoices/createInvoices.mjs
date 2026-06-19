@@ -1,27 +1,53 @@
-import { chromium } from "playwright-core";
+import { chromium } from "playwright-extra";
 import chromiumAws from "@sparticuz/chromium";
+import stealth from "puppeteer-extra-plugin-stealth";
+chromium.use(stealth());
 
 // AWS Lambda entry point
 export const handler = async () => {
   // TODO: Replace this hardcoded ID with event.projectId later
-  //const projectId = "2595";
+  const projectId = "2595";
 
   // Start headless Chromium using the Lambda-compatible Chromium binary
-  const browser = await chromium.launch({
-    args: chromiumAws.args,
-    executablePath: await chromiumAws.executablePath(),
-    headless: true,
-  });
+  const isLambda = !!process.env.AWS_LAMBDA_FUNCTION_NAME;
+
+  const browser = await chromium.launch(
+    isLambda
+      ? {
+          args: chromiumAws.args,
+          executablePath: await chromiumAws.executablePath(),
+          headless: true,
+        }
+      : { headless: true }, // local headless, to keep testing against Akamai
+  );
 
   const page = await browser.newPage();
 
-  // Open SuiteProjects login page
+  // Open SuiteProjects login page --
   await page.goto(
     "https://mlg-sb.app.sandbox.netsuitesuiteprojectspro.com/login",
-    {
-      waitUntil: "networkidle",
-    },
+    { waitUntil: "domcontentloaded" },
   );
+  // wait for the form to actually render, not just the HTML to parse
+  await page.waitForSelector("input", { timeout: 20000 }).catch(() => {});
+
+  const inputCount = await page.$$eval("input", (els) => els.length);
+  console.log("INPUT COUNT after wait:", inputCount);
+
+  const inputs = await page.$$eval("input", (els) =>
+    els.map((e) => ({
+      name: e.name,
+      id: e.id,
+      type: e.type,
+      placeholder: e.placeholder,
+    })),
+  );
+  console.log("INPUTS:", JSON.stringify(inputs));
+
+  // also grab a chunk of HTML so we can see the structure if inputs is still empty
+  const html = await page.content();
+  console.log("HTML SNIPPET:", html.slice(0, 2500));
+  // or write to /tmp and pull it, or log the full b64 and paste it back
 
   // Fill login form from Lambda environment variables
   await page.fill('input[name="companyID"]', process.env.OA_COMPANY_ID);
@@ -44,12 +70,21 @@ export const handler = async () => {
   console.log("uid: " + uid);
   // Ask SuiteProjects for the action menu for this project.
   // This is the key endpoint that returns generated URLs with valid r= tokens.
-  const actionResp = await page.request.get(
-    `https://mlg-sb.app.sandbox.netsuitesuiteprojectspro.com/webapi/v2/navigation/action_menu/by_module/tb?uid=${uid}&app=pm`,
-  );
-
-  console.log("actionResp: " + actionResp.text());
-  const actionJson = JSON.parse(await actionResp.text());
+  const actionJson = await page.evaluate(async (uid) => {
+    const res = await fetch(
+      `https://mlg-sb.app.sandbox.netsuitesuiteprojectspro.com/webapi/v2/navigation/action_menu/by_module/tb?uid=${uid}&app=pm`,
+      {
+        credentials: "include",
+      },
+    );
+    const text = await res.text();
+    try {
+      return { ok: true, data: JSON.parse(text) };
+    } catch {
+      return { ok: false, status: res.status, body: text.slice(0, 2000) };
+    }
+  }, uid);
+  console.log("action result:", JSON.stringify(actionJson).slice(0, 2000));
 
   // Find the "Invoices - All" action URL from the returned menu JSON
   const invoiceAllUrl = findUrlByPath(actionJson.data, [
@@ -125,7 +160,8 @@ function extractUid(url) {
 // descend; only the final name's URL is returned.
 // e.g. findUrlByPath(data, ["invoices", "all"]) -> the Invoices "All" url,
 //      not the Charges/slips "all" url.
-function findUrlByPath(items, path) {
+function findUrlByPath(list, path) {
+  const items = Array.isArray(list) ? list : list?.data;
   if (!items || !path.length) return null;
 
   const [head, ...rest] = path;
@@ -146,4 +182,10 @@ function findUrlByPath(items, path) {
   }
 
   return null;
+}
+
+if (!process.env.AWS_LAMBDA_FUNCTION_NAME) {
+  handler()
+    .then((r) => console.log(r))
+    .catch((e) => console.error(e));
 }

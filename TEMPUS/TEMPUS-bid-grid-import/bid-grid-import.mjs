@@ -145,7 +145,8 @@ async function newBidGridLoad(
             lookupBy: "name",
             inTable: "User",
           },
-          planned_hours: fileLines[i]["total hours"],
+          planned_hours:
+            fileLines[i]["Total Hours"] || fileLines[i]["total hours"] || 0,
           assign_cost__c: fileLines[i]["Total Cost"],
           assign_bid__c: fileLines[i]["Total Bid"],
         };
@@ -662,7 +663,8 @@ async function processAssignmentUpdates(
         lookupBy: "name",
         inTable: "User",
       },
-      planned_hours: assignment.row["total hours"],
+      planned_hours:
+        assignment.row["Total Hours"] || assignment.row["total hours"] || 0,
       assign_cost__c: assignment.row["Total Cost"],
       assign_bid__c: assignment.row["Total Bid"],
       ...(isModified && {
@@ -831,7 +833,7 @@ function accumulateProjectTotals(record, projectCalculations) {
   const totalCost = parseFloat(record["Total Cost"]) || 0;
 
   projectCalculations.proj_total_hours__c +=
-    parseFloat(record["total hours"]) || 0;
+    parseFloat(record["Total Hours"]) || parseFloat(record["total hours"]) || 0;
 
   if (record["Budget Category"] === "Directs") {
     projectCalculations.proj_directs__c += totalBid;
@@ -852,7 +854,7 @@ function accumulateProjectTotals(record, projectCalculations) {
     projectCalculations.proj_project_gm__c += totalBid - totalCost;
   }
 
-  if (record["Budget Cateogry"] === "Fees") {
+  if (record["Budget Category"] === "Fees") {
     projectCalculations.proj_pt_fees__c += totalBid;
     projectCalculations.proj_pt_total__c += totalBid;
     projectCalculations.proj_contract_value__c += totalBid;

@@ -102,11 +102,11 @@ export const handler = async () => {
     .waitForLoadState("networkidle", { timeout: 15000 })
     .catch(() => {});
 
-  // Fill out the baseline form
+  // Fill out the create multiple invoices form
   await page.fill('input[name="invoice_date"]', `06/07/2026`);
 
   await page.fill('input[name="acct_date"]', "06/08/2026");
-
+  await page.selectOption('select[name="date_range"]', "All");
   // Optional: mark it as reporting/comparison baseline
   // await page.check('input[name="comparison_baseline"]');
 
@@ -135,7 +135,8 @@ export const handler = async () => {
 
   // Capture final page HTML for basic validation/debugging
   const resultHtml = await page.content();
-
+  const bodyText = await page.evaluate(() => document.body.innerText);
+  console.log("BODY TEXT:", bodyText.slice(0, 3000));
   await browser.close();
 
   // Return debugging/confirmation data to Lambda test output

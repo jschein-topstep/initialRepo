@@ -55,7 +55,11 @@ async function buildUpsertXml(criteria, logs) {
         const inTable = writeObj[key].inTable;
 
         if (lookupBy === "externalid") {
-          criteriaXML += `<${key} external="${inTable}">${value}</${key}>`;
+          if (inTable === criteria.recordType && key === "id") {
+            action = 'Add lookup="externalid"';
+          } else {
+            criteriaXML += `<${key} external="${inTable}">${value}</${key}>`;
+          }
         } else {
           let idValue;
           const foundStoredObject = valueStore.find(
@@ -119,7 +123,11 @@ async function buildUpsertXml(criteria, logs) {
         }
       }
     }
-    completeXML += `<${action} type="${criteria.recordType}" enable_custom="1"><${criteria.recordType}>${criteriaXML}</${criteria.recordType}></${action}>`;
+    const actionClose =
+      action.indexOf(" ") >= 0
+        ? action.substring(0, action.indexOf(" "))
+        : action;
+    completeXML += `<${action} type="${criteria.recordType}" enable_custom="1"><${criteria.recordType}>${criteriaXML}</${criteria.recordType}></${actionClose}>`;
   }
 
   const accessToken = await getValidAccessToken(
@@ -228,10 +236,10 @@ async function test() {
     recordType: "Projecttask",
     writeObj: [
       {
-        projectid: 176,
+        projectid: 196,
         name: "RegOps Management & Oversight Through Last Site Activated",
         parentid: {
-          value: "proj176_phase0",
+          value: "proj196_phaseREGULATORY AFFAIRS & INVESTIGATOR SERVICES",
           lookupBy: "externalid",
           inTable: "Projecttask",
         },
@@ -242,15 +250,20 @@ async function test() {
         },
         id_number: "1.02",
         unit_basis__c: "month",
-        number_units__c: "13",
-        externalid: "proj176_task0",
+        number_units__c: "10",
+        externalid: "proj196_task1.02",
+        id: {
+          inTable: "Projecttask",
+          lookupBy: "externalid",
+          value: "proj196_task1.02",
+        },
       },
 
       {
-        projectid: 176,
+        projectid: 196,
         name: "RegOps Management & Oversight: Enrollment Period Once All Sites Active",
         parentid: {
-          value: "proj176_phase0",
+          value: "proj196_phaseREGULATORY AFFAIRS & INVESTIGATOR SERVICES",
           lookupBy: "externalid",
           inTable: "Projecttask",
         },
@@ -260,7 +273,7 @@ async function test() {
           lookupBy: "name",
           inTable: "Category",
         },
-        externalid: "proj176_task1",
+        externalid: "proj176_task1.03",
       },
     ],
   });

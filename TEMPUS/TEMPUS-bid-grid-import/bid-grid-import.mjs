@@ -346,11 +346,11 @@ async function updateBidGridValues(
         const field = [];
         field[0] = projectRecord.name; // Project ID
         field[1] = task.unit_budget_cat__c; // Budget Category
-        field[2] = categoryRecord.name; // Revenue Account
-        field[3] = costCenterRecord.name; // Team
-        field[4] = departmentRecord.name; // Functional Area
+        field[2] = categoryRecord?.name || ""; // Revenue Account
+        field[3] = costCenterRecord?.name || ""; // Team
+        field[4] = departmentRecord?.name || ""; // Functional Area
         field[5] = 1; // Tab
-        field[6] = phaseRecord.name; // Header
+        field[6] = phaseRecord?.name || ""; // Header
         field[7] = task.id_number; // Unit Number
         field[8] = task.name; // Unit Name
         field[9] = task.unit_basis__c; // Unit Basis
@@ -368,11 +368,11 @@ async function updateBidGridValues(
       const field = [];
       field[0] = projectRecord.name; // Project ID
       field[1] = task.unit_budget_cat__c; // Budget Category
-      field[2] = categoryRecord.name; // Revenue Account
-      field[3] = costCenterRecord.name; // Team
-      field[4] = departmentRecord.name; // Functional Area
+      field[2] = categoryRecord?.name || ""; // Revenue Account
+      field[3] = costCenterRecord?.name || ""; // Team
+      field[4] = ""; // Functional Area -- blank because no assignment
       field[5] = 1; // Tab
-      field[6] = phaseRecord.name; // Header
+      field[6] = phaseRecord?.name || ""; // Header
       field[7] = task.id_number; // Unit Number
       field[8] = task.name; // Unit Name
       field[9] = task.unit_basis__c; // Unit Basis
@@ -411,15 +411,6 @@ async function updateBidGridValues(
       key: ["Unit Number", "Bid Role"],
     },
   ];
-
-  const origSnippet = originalCsv.substring(
-    originalCsv.indexOf("F2F Meetings") - 200,
-    originalCsv.indexOf("F2F Meetings") + 200,
-  );
-  const newSnippet = newCsv.substring(
-    newCsv.indexOf("F2F Meetings") - 200,
-    newCsv.indexOf("F2F Meetings") + 200,
-  );
 
   const diffResults = await callSharedUtil("tslib-csvDiff", {
     originalCsv,
@@ -475,7 +466,11 @@ async function processPhaseUpdates(projectRecord, phaseInfo, phaseObjArray) {
 
 async function processTaskUpdates(projectRecord, taskInfo, taskObjArray) {
   for (const taskDeletion of taskInfo.deleted) {
-    console.log("here");
+    if (taskDeletion.row.Header !== "") {
+      console.log("here");
+    } else {
+      console.log("there");
+    }
   }
 
   const allTaskChanges = [

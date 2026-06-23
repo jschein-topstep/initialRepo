@@ -5,9 +5,6 @@ chromium.use(stealth());
 
 // AWS Lambda entry point
 export const handler = async () => {
-  // TODO: Replace this hardcoded ID with event.projectId later
-  const projectId = "2595";
-
   // Start headless Chromium using the Lambda-compatible Chromium binary
   const isLambda = !!process.env.AWS_LAMBDA_FUNCTION_NAME;
 
@@ -18,14 +15,14 @@ export const handler = async () => {
           executablePath: await chromiumAws.executablePath(),
           headless: true,
         }
-      : { headless: true }, // local headless, to keep testing against Akamai
+      : { headless: false }, // local headless, to keep testing against Akamai
   );
 
   const page = await browser.newPage();
 
   // Open SuiteProjects login page --
   await page.goto(
-    "https://mlg-sb.app.sandbox.netsuitesuiteprojectspro.com/login",
+    "https://med-learning-group-llc.app.netsuitesuiteprojectspro.com/login",
     { waitUntil: "domcontentloaded" },
   );
   // wait for the form to actually render, not just the HTML to parse
@@ -50,9 +47,15 @@ export const handler = async () => {
   // or write to /tmp and pull it, or log the full b64 and paste it back
 
   // Fill login form from Lambda environment variables
-  await page.fill('input[name="companyID"]', process.env.OA_COMPANY_ID);
-  await page.fill('input[name="userID"]', process.env.OA_USER_ID);
-  await page.fill('input[name="password"]', process.env.OA_PASSWORD);
+  if (isLambda) {
+    await page.fill('input[name="companyID"]', process.env.OA_COMPANY_ID);
+    await page.fill('input[name="userID"]', process.env.OA_USER_ID);
+    await page.fill('input[name="password"]', process.env.OA_PASSWORD);
+  } else {
+    await page.fill('input[name="companyID"]', "Med Learning Group, LLC");
+    await page.fill('input[name="userID"]', "sysuser");
+    await page.fill('input[name="password"]', "Topstep4");
+  }
 
   // Submit login form and wait for redirect into SuiteProjects
   await Promise.all([
@@ -72,7 +75,7 @@ export const handler = async () => {
   // This is the key endpoint that returns generated URLs with valid r= tokens.
   const actionJson = await page.evaluate(async (uid) => {
     const res = await fetch(
-      `https://mlg-sb.app.sandbox.netsuitesuiteprojectspro.com/webapi/v2/navigation/action_menu/by_module/tb?uid=${uid}&app=pm`,
+      `https://med-learning-group-llc.app.netsuitesuiteprojectspro.com/webapi/v2/navigation/action_menu/by_module/tb?uid=${uid}&app=pm`,
       {
         credentials: "include",
       },
@@ -122,6 +125,7 @@ export const handler = async () => {
 
   // One more page: a confirmation/second step. Let it settle, then click its
   // submit button and wait for the resulting navigation.
+  /*
   await page
     .waitForLoadState("networkidle", { timeout: 15000 })
     .catch(() => {});
@@ -132,11 +136,12 @@ export const handler = async () => {
   ]);
 
   await page.waitForLoadState("domcontentloaded").catch(() => {});
-
+*/
   // Capture final page HTML for basic validation/debugging
   const resultHtml = await page.content();
   const bodyText = await page.evaluate(() => document.body.innerText);
   console.log("BODY TEXT:", bodyText.slice(0, 3000));
+
   await browser.close();
 
   // Return debugging/confirmation data to Lambda test output

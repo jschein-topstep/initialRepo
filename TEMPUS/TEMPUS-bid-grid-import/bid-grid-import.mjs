@@ -361,7 +361,7 @@ async function updateBidGridValues(
         field[14] = assignment.assign_bid__c; // Total Bid
         field[15] = "\r\n";
 
-        originalCsv += field.join(",");
+        originalCsv += field.map(csvField).join(",");
       }
     } else {
       // no task assignments
@@ -823,6 +823,16 @@ export const handler = async (event) => {
   );
 };
 
+function csvField(value) {
+  const s = String(value ?? "");
+  return s.includes(",") ||
+    s.includes('"') ||
+    s.includes("\n") ||
+    s.includes("\r")
+    ? `"${s.replace(/"/g, '""')}"`
+    : s;
+}
+
 function accumulateProjectTotals(record, projectCalculations) {
   const totalBid = parseFloat(record["Total Bid"]) || 0;
   const totalCost = parseFloat(record["Total Cost"]) || 0;
@@ -869,7 +879,7 @@ function accumulateProjectTotals(record, projectCalculations) {
 
 async function test() {
   const result = await handler({
-    body: '{"fileId":111}',
+    body: '{"fileId":119}',
   });
   console.log(JSON.stringify(result, null, 2));
 }

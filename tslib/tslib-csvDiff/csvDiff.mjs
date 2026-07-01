@@ -33,9 +33,10 @@ function parseCsv(text) {
     if (ch === '"') {
       // Handle escaped double-quotes ("")
       if (inQuotes && text[i + 1] === '"') {
-        current += '"';
+        current += '""';
         i++;
       } else {
+        current += ch;
         inQuotes = !inQuotes;
       }
     } else if (ch === "\n" && !inQuotes) {

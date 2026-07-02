@@ -77,7 +77,7 @@ export const handler = async () => {
   const actionJson = await page.evaluate(async (uid) => {
     const res = await fetch(
       //`https://med-learning-group-llc.app.netsuitesuiteprojectspro.com/webapi/v2/navigation/action_menu/by_module/tb?uid=${uid}&app=pm`,
-      "https://mlg-sb.app.sandbox.netsuitesuiteprojectspro.com/webapi/v2/navigation/action_menu/by_module/tb?uid=${uid}&app=pm",
+      `https://mlg-sb.app.sandbox.netsuitesuiteprojectspro.com/webapi/v2/navigation/action_menu/by_module/tb?uid=${uid}&app=pm`,
       {
         credentials: "include",
       },

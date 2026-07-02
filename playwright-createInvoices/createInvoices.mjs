@@ -123,7 +123,7 @@ export const handler = async () => {
     ),
   ]);
 
-  //await page.waitForLoadState("domcontentloaded").catch(() => {});
+  await page.waitForLoadState("domcontentloaded").catch(() => {});
 
   // One more page: a confirmation/second step. Let it settle, then click its
   // submit button and wait for the resulting navigation.

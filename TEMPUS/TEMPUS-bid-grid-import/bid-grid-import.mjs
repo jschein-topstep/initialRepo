@@ -359,9 +359,8 @@ async function updateBidGridValues(
         field[12] = assignment.planned_hours; // total hours
         field[13] = assignment.assign_cost__c; // Total Cost
         field[14] = assignment.assign_bid__c; // Total Bid
-        field[15] = "\r\n";
 
-        originalCsv += field.join(",");
+        originalCsv += field.map(csvField).join(",") + "\r\n";
       }
     } else {
       // no task assignments
@@ -381,9 +380,8 @@ async function updateBidGridValues(
       field[12] = ""; // total hours -- blank because no assignment
       field[13] = task.unit_total_cost__c; // Total Cost from Task
       field[14] = task.unit_total_bid__c; // Total Bid from Task
-      field[15] = "\r\n";
 
-      originalCsv += field.join(",");
+      originalCsv += field.map(csvField).join(",") + "\r\n";
     }
   }
 
@@ -823,6 +821,16 @@ export const handler = async (event) => {
   );
 };
 
+function csvField(value) {
+  const s = String(value ?? "");
+  return s.includes(",") ||
+    s.includes('"') ||
+    s.includes("\n") ||
+    s.includes("\r")
+    ? `"${s.replace(/"/g, '""')}"`
+    : s;
+}
+
 function accumulateProjectTotals(record, projectCalculations) {
   const totalBid = parseFloat(record["Total Bid"]) || 0;
   const totalCost = parseFloat(record["Total Cost"]) || 0;
@@ -869,7 +877,7 @@ function accumulateProjectTotals(record, projectCalculations) {
 
 async function test() {
   const result = await handler({
-    body: '{"fileId":111}',
+    body: '{"fileId":124}',
   });
   console.log(JSON.stringify(result, null, 2));
 }

@@ -117,7 +117,7 @@ export const handler = async () => {
 
   // Submit the form
   await Promise.all([
-    page.waitForNavigation({ timeout: 30000 }).catch(() => {}),
+    page.waitForNavigation({ timeout: 50000 }).catch(() => {}),
     page.click(
       'input[type="submit"][name="save"], input[type="submit"][value="Save"]',
     ),

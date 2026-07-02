@@ -22,8 +22,8 @@ export const handler = async () => {
 
   // Open SuiteProjects login page --
   await page.goto(
-    //"https://med-learning-group-llc.app.netsuitesuiteprojectspro.com/login",
-    "https://mlg-sb.app.sandbox.netsuitesuiteprojectspro.com/login",
+    "https://med-learning-group-llc.app.netsuitesuiteprojectspro.com/login",
+    //"https://mlg-sb.app.sandbox.netsuitesuiteprojectspro.com/login",
     { waitUntil: "domcontentloaded" },
   );
   // wait for the form to actually render, not just the HTML to parse
@@ -76,8 +76,8 @@ export const handler = async () => {
   // This is the key endpoint that returns generated URLs with valid r= tokens.
   const actionJson = await page.evaluate(async (uid) => {
     const res = await fetch(
-      //`https://med-learning-group-llc.app.netsuitesuiteprojectspro.com/webapi/v2/navigation/action_menu/by_module/tb?uid=${uid}&app=pm`,
-      "https://mlg-sb.app.sandbox.netsuitesuiteprojectspro.com/webapi/v2/navigation/action_menu/by_module/tb?uid=${uid}&app=pm",
+      `https://med-learning-group-llc.app.netsuitesuiteprojectspro.com/webapi/v2/navigation/action_menu/by_module/tb?uid=${uid}&app=pm`,
+      //"https://mlg-sb.app.sandbox.netsuitesuiteprojectspro.com/webapi/v2/navigation/action_menu/by_module/tb?uid=${uid}&app=pm",
       {
         credentials: "include",
       },
@@ -117,7 +117,7 @@ export const handler = async () => {
 
   // Submit the form
   await Promise.all([
-    page.waitForNavigation({ timeout: 50000 }).catch(() => {}),
+    page.waitForNavigation({ timeout: 30000 }).catch(() => {}),
     page.click(
       'input[type="submit"][name="save"], input[type="submit"][value="Save"]',
     ),

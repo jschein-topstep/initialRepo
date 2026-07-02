@@ -53,9 +53,9 @@ export const handler = async () => {
     await page.fill('input[name="userID"]', process.env.OA_USER_ID);
     await page.fill('input[name="password"]', process.env.OA_PASSWORD);
   } else {
-    await page.fill('input[name="companyID"]', "Med Learning Group, LLC");
-    await page.fill('input[name="userID"]', "sysuser");
-    await page.fill('input[name="password"]', "Topstep4");
+    await page.fill('input[name="companyID"]', "MLG SB");
+    await page.fill('input[name="userID"]', "medlearning@topstepllc.com");
+    await page.fill('input[name="password"]', "Spr1ng2026!");
   }
 
   // Submit login form and wait for redirect into SuiteProjects

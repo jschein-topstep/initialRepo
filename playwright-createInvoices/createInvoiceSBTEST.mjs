@@ -22,7 +22,8 @@ export const handler = async () => {
 
   // Open SuiteProjects login page --
   await page.goto(
-    "https://med-learning-group-llc.app.netsuitesuiteprojectspro.com/login",
+    //"https://med-learning-group-llc.app.netsuitesuiteprojectspro.com/login",
+    "https://mlg-sb.app.sandbox.netsuitesuiteprojectspro.com/login",
     { waitUntil: "domcontentloaded" },
   );
   // wait for the form to actually render, not just the HTML to parse
@@ -52,9 +53,9 @@ export const handler = async () => {
     await page.fill('input[name="userID"]', process.env.OA_USER_ID);
     await page.fill('input[name="password"]', process.env.OA_PASSWORD);
   } else {
-    await page.fill('input[name="companyID"]', "Med Learning Group, LLC");
-    await page.fill('input[name="userID"]', "sysuser");
-    await page.fill('input[name="password"]', "Topstep4");
+    await page.fill('input[name="companyID"]', "MLG SB");
+    await page.fill('input[name="userID"]', "medlearning@topstepllc.com");
+    await page.fill('input[name="password"]', "Spr1ng2026!");
   }
 
   // Submit login form and wait for redirect into SuiteProjects
@@ -75,7 +76,8 @@ export const handler = async () => {
   // This is the key endpoint that returns generated URLs with valid r= tokens.
   const actionJson = await page.evaluate(async (uid) => {
     const res = await fetch(
-      `https://med-learning-group-llc.app.netsuitesuiteprojectspro.com/webapi/v2/navigation/action_menu/by_module/tb?uid=${uid}&app=pm`,
+      //`https://med-learning-group-llc.app.netsuitesuiteprojectspro.com/webapi/v2/navigation/action_menu/by_module/tb?uid=${uid}&app=pm`,
+      `https://mlg-sb.app.sandbox.netsuitesuiteprojectspro.com/webapi/v2/navigation/action_menu/by_module/tb?uid=${uid}&app=pm`,
       {
         credentials: "include",
       },
@@ -121,11 +123,11 @@ export const handler = async () => {
     ),
   ]);
 
-  //await page.waitForLoadState("domcontentloaded").catch(() => {});
+  await page.waitForLoadState("domcontentloaded").catch(() => {});
 
   // One more page: a confirmation/second step. Let it settle, then click its
   // submit button and wait for the resulting navigation.
-  /*
+
   await page
     .waitForLoadState("networkidle", { timeout: 15000 })
     .catch(() => {});
@@ -136,7 +138,7 @@ export const handler = async () => {
   ]);
 
   await page.waitForLoadState("domcontentloaded").catch(() => {});
-*/
+
   // Capture final page HTML for basic validation/debugging
   const resultHtml = await page.content();
   const bodyText = await page.evaluate(() => document.body.innerText);

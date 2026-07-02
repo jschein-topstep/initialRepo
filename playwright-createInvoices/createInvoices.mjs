@@ -127,7 +127,7 @@ export const handler = async () => {
 
   // One more page: a confirmation/second step. Let it settle, then click its
   // submit button and wait for the resulting navigation.
-  /*
+
   await page
     .waitForLoadState("networkidle", { timeout: 15000 })
     .catch(() => {});
@@ -138,7 +138,7 @@ export const handler = async () => {
   ]);
 
   await page.waitForLoadState("domcontentloaded").catch(() => {});
-*/
+
   // Capture final page HTML for basic validation/debugging
   const resultHtml = await page.content();
   const bodyText = await page.evaluate(() => document.body.innerText);

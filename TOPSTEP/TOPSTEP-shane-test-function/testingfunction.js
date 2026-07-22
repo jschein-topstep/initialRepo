@@ -3,12 +3,16 @@ const sharedPath = process.env.AWS_LAMBDA_FUNCTION_NAME
 : "../../shared/sharedUtils.js";
 const { callSharedUtil } = await import(sharedPath);
 
-export const handler = async (event) => {
+    const authObj = {
+        company: process.env.COMPANY,
+        user: process.env.USER,
+        password: process.env.PASSWORD,
+        instance: process.env.INSTANCE,
+    };
 
+    export const handler = async (event) => {
 
-    
     const postUrl="https://"+NS_acct_num+".suitetalk.api.netsuite.com/services/rest/auth/oauth2/v1/token";
-
 
     const sppProjectRequest = {
         authObj: authObj,
@@ -32,4 +36,4 @@ export const handler = async (event) => {
         body: JSON.stringify(projectRecords),
     };
     return response;
-};
+    };

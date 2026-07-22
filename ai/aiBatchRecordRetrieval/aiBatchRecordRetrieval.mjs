@@ -20,6 +20,7 @@ function chunk(arr, size) {
 export const handler = async (event) => {
   try {
     const { references } = event;
+    console.log(`ref: ${JSON.stringify(references)}`);
 
     if (!Array.isArray(references) || references.length === 0) {
       return {
@@ -86,3 +87,28 @@ export const handler = async (event) => {
     return { statusCode: 500, body: { error: err.message } };
   }
 };
+
+async function test() {
+  const result = await handler({
+    references: [
+      {
+        table: "spp-customers",
+        id: "4471",
+      },
+      {
+        table: "spp-users",
+        id: "112",
+      },
+      {
+        table: "spp-projectStages",
+        id: "3",
+      },
+    ],
+  });
+
+  console.log(JSON.stringify(result, null, 2));
+}
+
+if (!process.env.AWS_LAMBDA_FUNCTION_NAME) {
+  test();
+}

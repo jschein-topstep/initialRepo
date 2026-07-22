@@ -5,9 +5,9 @@ const client = new DynamoDBClient({});
 const docClient = DynamoDBDocumentClient.from(client);
 
 const TABLE_MAP = {
-  customers: { tableName: "spp-customers", keyType: "string" },
-  users: { tableName: "spp-users", keyType: "string" },
-  stages: { tableName: "spp-projectStages", keyType: "string" },
+  "spp-customers": { tableName: "spp-customers", keyType: "string" },
+  "spp-users": { tableName: "spp-users", keyType: "string" },
+  "spp-projectStages": { tableName: "spp-projectStages", keyType: "string" },
 };
 
 // DynamoDB BatchGetItem caps at 100 keys per table per request

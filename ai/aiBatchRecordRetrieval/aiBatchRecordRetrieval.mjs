@@ -20,7 +20,7 @@ function chunk(arr, size) {
 export const handler = async (event) => {
   try {
     const { references } = event;
-    console.log(`ref: ${JSON.stringify(references)}`);
+    console.log(`event: ${JSON.stringify(event)}`);
 
     if (!Array.isArray(references) || references.length === 0) {
       return {

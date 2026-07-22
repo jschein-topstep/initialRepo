@@ -19,7 +19,11 @@ function chunk(arr, size) {
 
 export const handler = async (event) => {
   try {
-    const { references } = event;
+    const rawBody = event.isBase64Encoded
+      ? Buffer.from(event.body, "base64").toString("utf-8")
+      : event.body;
+
+    const { references } = JSON.parse(rawBody);
     console.log(`event: ${JSON.stringify(event)}`);
 
     if (!Array.isArray(references) || references.length === 0) {

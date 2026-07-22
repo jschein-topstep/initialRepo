@@ -18,13 +18,14 @@ export const handler = async () => {
       : { headless: false }, // local headless, to keep testing against Akamai
   );
 
+  const baseUrl = isLambda
+    ? process.env.BASE_URL
+    : "https://mlg-sb.app.sandbox.netsuitesuiteprojectspro.com";
   const page = await browser.newPage();
 
   // Open SuiteProjects login page --
-  await page.goto(
-    "https://med-learning-group-llc.app.netsuitesuiteprojectspro.com/login",
-    { waitUntil: "domcontentloaded" },
-  );
+  await page.goto(`${baseUrl}/login`, { waitUntil: "domcontentloaded" });
+
   // wait for the form to actually render, not just the HTML to parse
   await page.waitForSelector("input", { timeout: 20000 }).catch(() => {});
 
@@ -43,7 +44,7 @@ export const handler = async () => {
 
   // also grab a chunk of HTML so we can see the structure if inputs is still empty
   const html = await page.content();
-  console.log("HTML SNIPPET:", html.slice(0, 2500));
+  //console.log("HTML SNIPPET:", html.slice(0, 2500));
   // or write to /tmp and pull it, or log the full b64 and paste it back
 
   // Fill login form from Lambda environment variables
@@ -52,9 +53,9 @@ export const handler = async () => {
     await page.fill('input[name="userID"]', process.env.OA_USER_ID);
     await page.fill('input[name="password"]', process.env.OA_PASSWORD);
   } else {
-    await page.fill('input[name="companyID"]', "Med Learning Group, LLC");
-    await page.fill('input[name="userID"]', "sysuser");
-    await page.fill('input[name="password"]', "Topstep4");
+    await page.fill('input[name="companyID"]', "MLG SB");
+    await page.fill('input[name="userID"]', "medlearning@topstepllc.com");
+    await page.fill('input[name="password"]', "Spr1ng2026!");
   }
 
   // Submit login form and wait for redirect into SuiteProjects
@@ -73,21 +74,24 @@ export const handler = async () => {
   console.log("uid: " + uid);
   // Ask SuiteProjects for the action menu for this project.
   // This is the key endpoint that returns generated URLs with valid r= tokens.
-  const actionJson = await page.evaluate(async (uid) => {
-    const res = await fetch(
-      `https://med-learning-group-llc.app.netsuitesuiteprojectspro.com/webapi/v2/navigation/action_menu/by_module/tb?uid=${uid}&app=pm`,
-      {
-        credentials: "include",
-      },
-    );
-    const text = await res.text();
-    try {
-      return { ok: true, data: JSON.parse(text) };
-    } catch {
-      return { ok: false, status: res.status, body: text.slice(0, 2000) };
-    }
-  }, uid);
-  console.log("action result:", JSON.stringify(actionJson).slice(0, 2000));
+  const actionJson = await page.evaluate(
+    async ({ uid, baseUrl }) => {
+      const res = await fetch(
+        `${baseUrl}/webapi/v2/navigation/action_menu/by_module/tb?uid=${uid}&app=pm`,
+        {
+          credentials: "include",
+        },
+      );
+      const text = await res.text();
+      try {
+        return { ok: true, data: JSON.parse(text) };
+      } catch {
+        return { ok: false, status: res.status, body: text.slice(0, 2000) };
+      }
+    },
+    { uid, baseUrl },
+  );
+  //console.log("action result:", JSON.stringify(actionJson).slice(0, 2000));
 
   // Find the "Invoices - All" action URL from the returned menu JSON
   const invoiceAllUrl = findUrlByPath(actionJson.data, [
@@ -121,11 +125,11 @@ export const handler = async () => {
     ),
   ]);
 
-  //await page.waitForLoadState("domcontentloaded").catch(() => {});
+  await page.waitForLoadState("domcontentloaded").catch(() => {});
 
   // One more page: a confirmation/second step. Let it settle, then click its
   // submit button and wait for the resulting navigation.
-  /*
+
   await page
     .waitForLoadState("networkidle", { timeout: 15000 })
     .catch(() => {});
@@ -136,11 +140,11 @@ export const handler = async () => {
   ]);
 
   await page.waitForLoadState("domcontentloaded").catch(() => {});
-*/
+
   // Capture final page HTML for basic validation/debugging
   const resultHtml = await page.content();
   const bodyText = await page.evaluate(() => document.body.innerText);
-  console.log("BODY TEXT:", bodyText.slice(0, 3000));
+  //console.log("BODY TEXT:", bodyText.slice(0, 3000));
 
   await browser.close();
 

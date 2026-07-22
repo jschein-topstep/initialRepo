@@ -7,6 +7,7 @@ const docClient = DynamoDBDocumentClient.from(client);
 const TABLE_MAP = {
   "spp-customers": { tableName: "spp-customers", keyType: "string" },
   "spp-users": { tableName: "spp-users", keyType: "string" },
+  "spp-projects": { tableName: "spp-projects", keyType: "string" },
   "spp-projectStages": { tableName: "spp-projectStages", keyType: "string" },
 };
 
@@ -22,9 +23,8 @@ export const handler = async (event) => {
     const rawBody = event.isBase64Encoded
       ? Buffer.from(event.body, "base64").toString("utf-8")
       : event.body;
-
-    const { references } = JSON.parse(rawBody);
     console.log(`event: ${JSON.stringify(event)}`);
+    const { references } = JSON.parse(rawBody);
 
     if (!Array.isArray(references) || references.length === 0) {
       return {
@@ -102,6 +102,10 @@ async function test() {
       {
         table: "spp-users",
         id: "112",
+      },
+      {
+        table: "spp-projects",
+        id: "31",
       },
       {
         table: "spp-projectStages",

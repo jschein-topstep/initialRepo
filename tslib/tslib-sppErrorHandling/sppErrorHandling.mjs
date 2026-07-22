@@ -20,7 +20,7 @@ export const handler = async (event) => {
   );
 
   if (!res.Item) {
-    throw new Error(`No error found for spp err code: ${event}`);
+    throw new Error(`No error found for spp error code: ${event}`);
   }
   console.log(`ErrorItem: ${JSON.stringify(res.Item)}`);
   return unmarshall(res.Item);

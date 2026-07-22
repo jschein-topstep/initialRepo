@@ -17,7 +17,7 @@ function chunk(arr, size) {
   return out;
 }
 
-exports.handler = async (event) => {
+export const handler = async (event) => {
   try {
     const { references } = event;
 

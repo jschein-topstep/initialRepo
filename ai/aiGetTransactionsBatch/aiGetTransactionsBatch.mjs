@@ -59,7 +59,7 @@ export const handler = async (event) => {
             KeyConditionExpression: "#pk = :pk and #sk between :sk1 and :sk2",
             ExpressionAttributeNames: {
               "#pk": "projectId",
-              "#sk": "type#period#userId",
+              "#sk": "sk",
             },
             ExpressionAttributeValues: {
               ":pk": projectid,
@@ -89,3 +89,19 @@ export const handler = async (event) => {
     return { statusCode: 500, body: JSON.stringify({ error: err.message }) };
   }
 };
+async function test() {
+  const result = await handler({
+    body: JSON.stringify({
+      projectIds: ["1975", "1821", "2471"],
+      type: "BOOKING",
+      year: 2025,
+      action: "sum",
+    }),
+  });
+
+  console.log(JSON.stringify(result, null, 2));
+}
+
+if (!process.env.AWS_LAMBDA_FUNCTION_NAME) {
+  test();
+}

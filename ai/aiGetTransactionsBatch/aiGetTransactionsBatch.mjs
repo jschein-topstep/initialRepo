@@ -72,7 +72,11 @@ export const handler = async (event) => {
         else if (action === "max")
           result = amounts.length ? Math.max(...amounts) : null;
 
-        return { ...project, recordCount: records.length, result }; // spread original object — nothing re-typed
+        return {
+          ...project,
+          recordCount: records.length,
+          result: Math.round(result * 100) / 100,
+        }; // spread original object — nothing re-typed
       }),
     );
 

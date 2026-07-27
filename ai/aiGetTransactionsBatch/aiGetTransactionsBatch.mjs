@@ -43,20 +43,23 @@ export const handler = async (event) => {
     // not agent tool calls
     const results = await Promise.all(
       projects.map(async (project) => {
-        const queryResult = await docClient.send(
-          new QueryCommand({
-            TableName: TABLE_NAME,
-            KeyConditionExpression: "#pk = :pk and #sk between :sk1 and :sk2",
-            ExpressionAttributeNames: {
-              "#pk": "projectId",
-              "#sk": "sk",
-            },
-            ExpressionAttributeValues: {
-              ":pk": project.id,
-              ":sk1": sk1,
-              ":sk2": sk2,
-            },
-          }),
+        const queryObj = {
+          TableName: TABLE_NAME,
+          KeyConditionExpression: "#pk = :pk and #sk between :sk1 and :sk2",
+          ExpressionAttributeNames: {
+            "#pk": "projectId",
+            "#sk": "sk",
+          },
+          ExpressionAttributeValues: {
+            ":pk": project.id,
+            ":sk1": sk1,
+            ":sk2": sk2,
+          },
+        };
+        const queryResult = await docClient.send(new QueryCommand(queryObj));
+
+        console.log(
+          `Query for project ${project.id}: ${JSON.stringify(queryObj)} -- results: ${JSON.stringify(queryResult)}`,
         );
 
         const records = queryResult.Items || [];
@@ -82,7 +85,26 @@ export const handler = async (event) => {
 async function test() {
   const result = await handler({
     body: JSON.stringify({
-      projectIds: ["1975", "1821", "2471"],
+      projects: [
+        {
+          id: "1975",
+          name: "proj1975",
+          customerId: "1900",
+          customerName: "cust1900",
+        },
+        {
+          id: "1821",
+          name: "proj1821",
+          customerId: "1800",
+          customerName: "cust1800",
+        },
+        {
+          id: "2471",
+          name: "proj2471",
+          customerId: "2400",
+          customerName: "cust2400",
+        },
+      ],
       type: "BOOKING",
       year: 2025,
       action: "sum",

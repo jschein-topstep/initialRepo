@@ -35,41 +35,30 @@ function buildSkRange({ type, year, month, quarter }) {
 
 export const handler = async (event) => {
   try {
-    const { projectIds, type, year, month, quarter, action } = JSON.parse(
+    const { projects, type, year, month, quarter, action } = JSON.parse(
       event.body,
     );
-
-    if (!Array.isArray(projectIds) || projectIds.length === 0) {
-      return {
-        statusCode: 400,
-        body: JSON.stringify({ error: "projectIds array is required" }),
-      };
-    }
-
     const { sk1, sk2 } = buildSkRange({ type, year, month, quarter });
-    const uniqueIds = [...new Set(projectIds.map(String))];
-
     // Run queries in parallel — one Query per project, but server-side,
     // not agent tool calls
     const results = await Promise.all(
-      uniqueIds.map(async (projectid) => {
+      projects.map(async (project) => {
         const queryResult = await docClient.send(
           new QueryCommand({
             TableName: TABLE_NAME,
             KeyConditionExpression: "#pk = :pk and #sk between :sk1 and :sk2",
             ExpressionAttributeNames: {
               "#pk": "projectId",
-              "#sk": "sk",
+              "#sk": "type#period#userId",
             },
             ExpressionAttributeValues: {
-              ":pk": projectid,
+              ":pk": project.id,
               ":sk1": sk1,
               ":sk2": sk2,
             },
           }),
         );
 
-        const records = queryResult.Items || [];
         const amounts = records.map((r) => parseFloat(r.amount));
         let result;
         if (action === "sum")
@@ -79,7 +68,7 @@ export const handler = async (event) => {
         else if (action === "max")
           result = amounts.length ? Math.max(...amounts) : null;
 
-        return { projectid, action, result, recordCount: records.length };
+        return { ...project, recordCount: records.length, result }; // spread original object — nothing re-typed
       }),
     );
 

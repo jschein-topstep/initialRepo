@@ -49,7 +49,7 @@ export const handler = async (event) => {
             KeyConditionExpression: "#pk = :pk and #sk between :sk1 and :sk2",
             ExpressionAttributeNames: {
               "#pk": "projectId",
-              "#sk": "type#period#userId",
+              "#sk": "sk",
             },
             ExpressionAttributeValues: {
               ":pk": project.id,

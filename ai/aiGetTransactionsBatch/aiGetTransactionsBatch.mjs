@@ -59,6 +59,7 @@ export const handler = async (event) => {
           }),
         );
 
+        const records = queryResult.Items || [];
         const amounts = records.map((r) => parseFloat(r.amount));
         let result;
         if (action === "sum")

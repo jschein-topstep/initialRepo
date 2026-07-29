@@ -36,9 +36,8 @@ function buildSkRange({ type, year, month, quarter }) {
 export const handler = async (event) => {
   try {
     console.log(`event: ${JSON.stringify(event)}`);
-    const { projects, type, year, month, quarter, action } = JSON.parse(
-      event.body,
-    );
+    const { queryDefinition, type, year, month, quarter, action, projects } =
+      JSON.parse(event.body);
 
     const { sk1, sk2 } = buildSkRange({ type, year, month, quarter });
     // Run queries in parallel — one Query per project, but server-side,

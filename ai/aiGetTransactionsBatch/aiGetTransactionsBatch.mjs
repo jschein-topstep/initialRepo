@@ -52,7 +52,7 @@ export const handler = async (event) => {
             "#sk": "sk",
           },
           ExpressionAttributeValues: {
-            ":pk": project.id,
+            ":pk": project.projectId,
             ":sk1": sk1,
             ":sk2": sk2,
           },
@@ -60,7 +60,7 @@ export const handler = async (event) => {
         const queryResult = await docClient.send(new QueryCommand(queryObj));
 
         console.log(
-          `Query for project ${project.id}: ${JSON.stringify(queryObj)} -- results: ${JSON.stringify(queryResult)}`,
+          `Query for project ${project.projectId}: ${JSON.stringify(queryObj)} -- results: ${JSON.stringify(queryResult)}`,
         );
 
         const records = queryResult.Items || [];

@@ -68,17 +68,17 @@ async function newBidGridLoad(
   const deleteResponse = await deleteExistingTasks(projectRecord.id);
 
   for (let i = 0; i < fileLines.length; i++) {
-    if (fileLines[i]["Header"]?.length > 0) {
+    if (fileLines[i]["Phase"]?.length > 0) {
       let matchingPhaseObject = phaseObjArray.find(
-        (phase) => phase.name === fileLines[i]["Header"],
+        (phase) => phase.name === fileLines[i]["Phase"],
       );
 
       if (matchingPhaseObject === undefined) {
         // the phase has not been encountered yet
-        const phaseExtId = `proj${projectRecord.id}_phase${fileLines[i]["Header"]}`;
+        const phaseExtId = `proj${projectRecord.id}_phase${fileLines[i]["Phase"]}`;
         const newPhaseObj = {
           projectid: projectRecord.id,
-          name: fileLines[i]["Header"],
+          name: fileLines[i]["Phase"],
           is_a_phase: 1,
           externalid: phaseExtId,
         };
@@ -110,15 +110,15 @@ async function newBidGridLoad(
           },
           unit_budget_cat__c: fileLines[i]["Budget Category"],
           default_category: {
-            value: fileLines[i]["Revenue Account"],
+            value: fileLines[i]["Item Name"],
             lookupBy: "name",
             inTable: "Category",
           },
           id_number: fileLines[i]["Unit Number"],
           unit_basis__c: fileLines[i]["Unit Basis"],
           number_units__c: fileLines[i]["# of Units"],
-          unit_total_cost__c: fileLines[i]["Total Cost"], // will get overridden if there are task assignments
-          unit_total_bid__c: fileLines[i]["Total Bid"], // will geet overridden if there are task assignments
+          unit_total_cost__c: fileLines[i]["Unit Amount"], // will get overridden if there are task assignments
+          unit_total_bid__c: fileLines[i]["Total Bid"], // will get overridden if there are task assignments
           projecttask_typeid: 2,
           externalid: taskExtId,
         };
@@ -147,7 +147,7 @@ async function newBidGridLoad(
           },
           planned_hours:
             fileLines[i]["Total Hours"] || fileLines[i]["total hours"] || 0,
-          assign_cost__c: fileLines[i]["Total Cost"],
+          assign_cost__c: fileLines[i]["Unit Amount"],
           assign_bid__c: fileLines[i]["Total Bid"],
         };
 
@@ -293,8 +293,11 @@ async function updateBidGridValues(
 ) {
   const dataStore = [];
 
+  //let originalCsv =
+  //"Project ID,Budget Category,Revenue Account,Team,Functional Area,Tab,Header,Unit Number,Unit Name,Unit Basis,# of Units,Bid Role,total hours,Total Cost,Total Bid\r\n";
   let originalCsv =
-    "Project ID,Budget Category,Revenue Account,Team,Functional Area,Tab,Header,Unit Number,Unit Name,Unit Basis,# of Units,Bid Role,total hours,Total Cost,Total Bid\r\n";
+    "SPP_Project,Budget Category,Item Internal ID,Item Name,Phase,Sub-phase,Unit Number,Unit Name,Unit Basis,# of Units,Team,Functional Area,Bid Role,Total Hours,Unit Amount,Total Bid\r\n";
+  // csv field updates -- 7/29
   const sppTaskRequest = {
     authObj: authObj,
     recordType: "Projecttask",
@@ -344,7 +347,7 @@ async function updateBidGridValues(
         });
 
         const field = [];
-        field[0] = projectRecord.name; // Project ID
+        /*field[0] = projectRecord.name; // Project ID
         field[1] = task.unit_budget_cat__c; // Budget Category
         field[2] = categoryRecord?.name || ""; // Revenue Account
         field[3] = costCenterRecord?.name || ""; // Team
@@ -358,28 +361,65 @@ async function updateBidGridValues(
         field[11] = userRecord.name; // Bid Role
         field[12] = assignment.planned_hours; // total hours
         field[13] = assignment.assign_cost__c; // Total Cost
-        field[14] = assignment.assign_bid__c; // Total Bid
+        field[14] = assignment.assign_bid__c; // Total Bid*/
+
+        // NEW MAPPING -- 7/29
+        field[0] = projectRecord.name; // SPP_Project
+        field[1] = task.unit_budget_cat__c; // Budget Category
+        //field[2] = categoryRecord?.name || ""; // Item Internal ID
+        field[3] = categoryRecord?.name || ""; // Item Name
+        field[4] = phaseRecord?.name || ""; // Header
+        field[5] = phaseRecord?.name || ""; // Sub-phase
+        field[6] = task.id_number; // Unit Number
+        field[7] = task.name; // Unit Name
+        field[8] = task.unit_basis__c; // Unit Basis
+        field[9] = task.number_units__c; // # of Units
+        field[10] = costCenterRecord?.name || ""; // Team
+        field[11] = departmentRecord?.name || ""; // Functional Area
+        field[12] = userRecord.name; // Bid Role
+        field[13] = assignment.planned_hours; // total hours
+        field[14] = assignment.assign_cost__c; // Unit Amount
+        field[15] = assignment.assign_bid__c; // Total Bid
 
         originalCsv += field.map(csvField).join(",") + "\r\n";
       }
     } else {
       // no task assignments
       const field = [];
-      field[0] = projectRecord.name; // Project ID
+      /*field[0] = projectRecord.name; // SPP_Project
       field[1] = task.unit_budget_cat__c; // Budget Category
-      field[2] = categoryRecord?.name || ""; // Revenue Account
-      field[3] = costCenterRecord?.name || ""; // Team
-      field[4] = ""; // Functional Area -- blank because no assignment
-      field[5] = 1; // Tab
-      field[6] = phaseRecord?.name || ""; // Header
-      field[7] = task.id_number; // Unit Number
-      field[8] = task.name; // Unit Name
-      field[9] = task.unit_basis__c; // Unit Basis
-      field[10] = task.number_units__c; // # of Units
-      field[11] = ""; // Bid Role -- blank because no assignment
-      field[12] = ""; // total hours -- blank because no assignment
+      //field[2] = categoryRecord?.name || ""; // Item Internal ID
+      field[3] = categoryRecord?.name || ""; // Item Name
+      field[4] = costCenterRecord?.name || ""; // Team
+      field[5] = ""; // Functional Area -- blank because no assignment
+      field[6] = 1; // Tab
+      field[7] = phaseRecord?.name || ""; // Header
+      field[8] = task.id_number; // Unit Number
+      field[9] = task.name; // Unit Name
+      field[10] = task.unit_basis__c; // Unit Basis
+      field[11] = task.number_units__c; // # of Units
+      field[12] = ""; // Bid Role -- blank because no assignment
+      field[13] = ""; // total hours -- blank because no assignment
       field[13] = task.unit_total_cost__c; // Total Cost from Task
-      field[14] = task.unit_total_bid__c; // Total Bid from Task
+      field[14] = task.unit_total_bid__c; // Total Bid from Task*/
+
+      // NEW MAPPING -- 7/29
+      field[0] = projectRecord.name; // SPP_Project
+      field[1] = task.unit_budget_cat__c; // Budget Category
+      //field[2] = categoryRecord?.name || ""; // Item Internal ID
+      field[3] = categoryRecord?.name || ""; // Item Name
+      field[4] = phaseRecord?.name || ""; // Header
+      field[5] = phaseRecord?.name || ""; // Sub-phase
+      field[6] = task.id_number; // Unit Number
+      field[7] = task.name; // Unit Name
+      field[8] = task.unit_basis__c; // Unit Basis
+      field[9] = task.number_units__c; // # of Units
+      field[10] = costCenterRecord?.name || ""; // Team
+      field[11] = departmentRecord?.name || ""; // Functional Area
+      field[12] = userRecord.name; // Bid Role
+      field[13] = assignment.planned_hours; // total hours
+      field[14] = assignment.assign_cost__c; // Unit Amount
+      field[15] = assignment.assign_bid__c; // Total Bid
 
       originalCsv += field.map(csvField).join(",") + "\r\n";
     }
@@ -396,7 +436,8 @@ async function updateBidGridValues(
       fields: [
         "Team",
         "Budget Category",
-        "Revenue Account",
+        //"Revenue Account",
+        "Item Name",
         "Unit Name",
         "Unit Basis",
         "# of Units",
@@ -405,7 +446,7 @@ async function updateBidGridValues(
     },
     {
       entity: "Projecttaskassign",
-      fields: ["Functional Area", "Total Hours", "Total Cost", "Total Bid"],
+      fields: ["Functional Area", "Total Hours", "Unit Amount", "Total Bid"],
       key: ["Unit Number", "Bid Role"],
     },
   ];
@@ -436,10 +477,10 @@ async function updateBidGridValues(
 
 async function processPhaseUpdates(projectRecord, phaseInfo, phaseObjArray) {
   for (const phaseAdded of phaseInfo.added) {
-    const phaseExtId = `proj${projectRecord.id}_phase${phaseAdded.row["Header"]}`;
+    const phaseExtId = `proj${projectRecord.id}_phase${phaseAdded.row["Phase"]}`;
     const newPhaseObj = {
       projectid: projectRecord.id,
-      name: phaseAdded.row["Header"],
+      name: phaseAdded.row["Phase"],
       is_a_phase: 1,
       externalid: phaseExtId,
     };
@@ -450,10 +491,10 @@ async function processPhaseUpdates(projectRecord, phaseInfo, phaseObjArray) {
 
   /*
   for (const phaseDeleted of phaseInfo.deleted) {
-    const phaseExtId = `proj${projectRecord.id}_phase${phaseDeleted.row["Header"]}`;
+    const phaseExtId = `proj${projectRecord.id}_phase${phaseDeleted.row["Phase"]}`;
     const phaseObjToBeDeleted = {
       projectid: projectRecord.id,
-      name: phaseAdded.row["Header"],
+      name: phaseAdded.row["Phase"],
       is_a_phase: 1,
       externalid: phaseExtId,
     };
@@ -464,7 +505,7 @@ async function processPhaseUpdates(projectRecord, phaseInfo, phaseObjArray) {
 
 async function processTaskUpdates(projectRecord, taskInfo, taskObjArray) {
   for (const taskDeletion of taskInfo.deleted) {
-    if (taskDeletion.row.Header !== "") {
+    if (taskDeletion.row.Phase !== "") {
       console.log("here");
     } else {
       console.log("there");
@@ -477,7 +518,7 @@ async function processTaskUpdates(projectRecord, taskInfo, taskObjArray) {
   ];
   for (const { task, isModified } of allTaskChanges) {
     const taskExtId = `proj${projectRecord.id}_task${task.row["Unit Number"]}`;
-    const phaseExtId = `proj${projectRecord.id}_phase${task.row["Header"]}`;
+    const phaseExtId = `proj${projectRecord.id}_phase${task.row["Phase"]}`;
     const newTaskObj = {
       projectid: projectRecord.id,
       name: task.row["Unit Name"],
@@ -493,7 +534,7 @@ async function processTaskUpdates(projectRecord, taskInfo, taskObjArray) {
       },
       unit_budget_cat__c: task.row["Budget Category"],
       default_category: {
-        value: task.row["Revenue Account"],
+        value: task.row["Item Name"],
         lookupBy: "name",
         inTable: "Category",
       },
@@ -658,7 +699,7 @@ async function processAssignmentUpdates(
       },
       planned_hours:
         assignment.row["Total Hours"] || assignment.row["total hours"] || 0,
-      assign_cost__c: assignment.row["Total Cost"],
+      assign_cost__c: assignment.row["Unit Amount"],
       assign_bid__c: assignment.row["Total Bid"],
       ...(isModified && {
         id: idValue,
@@ -684,7 +725,7 @@ export const handler = async (event) => {
   const phaseNames = [];
   console.log(`headers: ${JSON.stringify(fileLines[0])}`);
 
-  const projectName = fileLines[0]["Project ID"];
+  const projectName = fileLines[0]["SPP_Project"];
   const sppProjectRequest = {
     authObj: authObj,
     recordType: "Project",
@@ -833,7 +874,7 @@ function csvField(value) {
 
 function accumulateProjectTotals(record, projectCalculations) {
   const totalBid = parseFloat(record["Total Bid"]) || 0;
-  const totalCost = parseFloat(record["Total Cost"]) || 0;
+  const totalCost = parseFloat(record["Unit Amount"]) || 0;
 
   projectCalculations.proj_total_hours__c +=
     parseFloat(record["Total Hours"]) || parseFloat(record["total hours"]) || 0;

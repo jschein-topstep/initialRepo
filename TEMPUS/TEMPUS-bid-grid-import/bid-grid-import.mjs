@@ -62,6 +62,7 @@ async function newBidGridLoad(
   projectRecord,
   projectCalculations,
   phaseObjArray,
+  subPhaseObjArray,
   taskObjArray,
   assignmentObjArray,
 ) {
@@ -809,6 +810,7 @@ export const handler = async (event) => {
       projectRecord,
       projectCalculations,
       phaseObjArray,
+      subPhaseObjArray,
       taskObjArray,
       assignmentObjArray,
     );
@@ -825,6 +827,20 @@ export const handler = async (event) => {
     const phaseWriteResponse = await callSharedUtil(
       "tslib-putRecords",
       phaseWriteRequest,
+    );
+  }
+
+  // create subphases
+  if (subPhaseObjArray.length > 0) {
+    const subPhaseWriteRequest = {
+      authObj: authObj,
+      recordType: "Projecttask",
+      writeObj: subPhaseObjArray,
+    };
+
+    const subPhaseWriteResponse = await callSharedUtil(
+      "tslib-putRecords",
+      subPhaseWriteRequest,
     );
   }
 

@@ -87,6 +87,29 @@ async function newBidGridLoad(
         matchingPhaseObject = newPhaseObj;
       }
 
+      let matchingSubPhaseObject = subPhaseObjArray.find(
+        (subPhase) => subPhase.name === fileLines[i]["Sub-phase"],
+      );
+
+      if (matchingSubPhaseObject === undefined) {
+        // the sub-phase has not been encountered yet
+        const subPhaseExtId = `proj${projectRecord.id}_subphase${fileLines[i]["Sub-phase"]}`;
+        const newSubPhaseObj = {
+          projectid: projectRecord.id,
+          name: fileLines[i]["Sub-phase"],
+          is_a_phase: 1,
+          externalid: subPhaseExtId,
+          parentid: {
+            value: matchingSubPhaseObject.externalid,
+            lookupBy: "externalid",
+            inTable: "Projecttask",
+          },
+        };
+
+        subPhaseObjArray.push(newSubPhaseObj);
+        matchingSubPhaseObject = newSubPhaseObj;
+      }
+
       let matchingTaskObject = taskObjArray.find(
         (task) => task.name === fileLines[i]["Unit Name"],
       );
@@ -462,7 +485,7 @@ async function updateBidGridValues(
   const taskInfo = diffResults[1]["Projecttask"];
   const assignmentInfo = diffResults[2]["Projecttaskassign"];
 
-  await processPhaseUpdates(projectRecord, phaseInfo, phaseObjArray);
+  //await processPhaseUpdates(projectRecord, phaseInfo, phaseObjArray); -- not needed as of 7/30
   await processTaskUpdates(projectRecord, taskInfo, taskObjArray);
   await processAssignmentUpdates(
     projectRecord,

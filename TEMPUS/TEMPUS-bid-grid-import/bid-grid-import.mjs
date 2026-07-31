@@ -768,6 +768,7 @@ export const handler = async (event) => {
   const phaseObjArray = [];
   const taskObjArray = [];
   const assignmentObjArray = [];
+  const subPhaseObjArray = [];
 
   const inflationPlusDiscount =
     parseFloat(projectRecord.proj_inflation__c) +
@@ -801,6 +802,7 @@ export const handler = async (event) => {
       projectRecord,
       projectCalculations,
       phaseObjArray,
+      subPhaseObjArray,
       taskObjArray,
       assignmentObjArray,
     );

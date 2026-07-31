@@ -101,7 +101,7 @@ async function newBidGridLoad(
           is_a_phase: 1,
           externalid: subPhaseExtId,
           parentid: {
-            value: matchingSubPhaseObject.externalid,
+            value: matchingPhaseObject.externalid,
             lookupBy: "externalid",
             inTable: "Projecttask",
           },

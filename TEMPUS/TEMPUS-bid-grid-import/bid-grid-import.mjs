@@ -1,5 +1,5 @@
 import { parse } from "csv-parse/sync";
-import { lambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
+import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
 
 const sharedPath = process.env.AWS_LAMBDA_FUNCTION_NAME
   ? "/opt/nodejs/sharedUtils.js"

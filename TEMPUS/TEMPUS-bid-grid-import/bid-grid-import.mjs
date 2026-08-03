@@ -289,7 +289,7 @@ async function calculateUnitPricePer(projId) {
     Payload: JSON.stringify({ projId }), // adjust shape to match target handler's expected event
   });
 
-  const response = await lambdaClient.send(command);
+  const response = await LambdaClient.send(command);
 
   const responsePayload = JSON.parse(
     Buffer.from(response.Payload).toString("utf-8"),

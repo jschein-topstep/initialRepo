@@ -1,5 +1,5 @@
 import { parse } from "csv-parse/sync";
-const { LambdaClient, InvokeCommand } = require("@aws-sdk/client-lambda");
+
 const sharedPath = process.env.AWS_LAMBDA_FUNCTION_NAME
   ? "/opt/nodejs/sharedUtils.js"
   : "../../shared/sharedUtils.js";
@@ -278,23 +278,31 @@ async function newBidGridLoad(
     }
   }
 }*/
-
-const lambdaClient = new LambdaClient({ region: "us-east-2" }); // or wherever your functions live
-
-async function invokeOtherLambda(projId) {
+// calculateUnitPricePer has been migrated to the standalone
+// TEMPUS-calculate-unit-price Lambda function.
+async function calculateUnitPricePer(projId) {
   const command = new InvokeCommand({
     FunctionName:
-      "arn:aws:lambda:us-east-2:776528084998:function:TEMPUS-calculate-unit-price", // or full ARN
-    InvocationType: "RequestResponse", // synchronous — waits for response
-    Payload: JSON.stringify(projId),
+      "arn:aws:lambda:us-east-2:776528084998:function:TEMPUS-calculate-unit-price",
+    InvocationType: "RequestResponse",
+    Payload: JSON.stringify({ projId }), // adjust shape to match target handler's expected event
   });
 
   const response = await lambdaClient.send(command);
 
-  // Payload comes back as a Uint8Array, need to decode
   const responsePayload = JSON.parse(
     Buffer.from(response.Payload).toString("utf-8"),
   );
+
+  if (response.FunctionError) {
+    console.error(
+      `TEMPUS-calculate-unit-price threw an error: ${JSON.stringify(responsePayload)}`,
+    );
+    throw new Error(
+      `calculateUnitPricePer Lambda invocation failed: ${responsePayload?.errorMessage ?? "unknown error"}`,
+    );
+  }
+
   console.log(`responsePayload: ${JSON.stringify(responsePayload)}`);
   return responsePayload;
 }

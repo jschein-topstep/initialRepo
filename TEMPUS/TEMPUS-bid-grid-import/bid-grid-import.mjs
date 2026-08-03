@@ -1,5 +1,5 @@
 import { parse } from "csv-parse/sync";
-
+const { LambdaClient, InvokeCommand } = require("@aws-sdk/client-lambda");
 const sharedPath = process.env.AWS_LAMBDA_FUNCTION_NAME
   ? "/opt/nodejs/sharedUtils.js"
   : "../../shared/sharedUtils.js";
@@ -278,7 +278,6 @@ async function newBidGridLoad(
     }
   }
 }*/
-const { LambdaClient, InvokeCommand } = require("@aws-sdk/client-lambda");
 
 const lambdaClient = new LambdaClient({ region: "us-east-2" }); // or wherever your functions live
 

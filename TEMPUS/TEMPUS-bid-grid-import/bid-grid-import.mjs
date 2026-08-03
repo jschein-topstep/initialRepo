@@ -185,7 +185,7 @@ async function newBidGridLoad(
   }
 }
 
-async function calculateUnitPricePer(projId) {
+/*async function calculateUnitPricePer(projId) {
   const sppTaskRequest = {
     authObj: authObj,
     recordType: "Projecttask",
@@ -277,6 +277,27 @@ async function calculateUnitPricePer(projId) {
       const uprateAdd = await callSharedUtil("tslib-putRecords", uprateDetails);
     }
   }
+}*/
+const { LambdaClient, InvokeCommand } = require("@aws-sdk/client-lambda");
+
+const lambdaClient = new LambdaClient({ region: "us-east-2" }); // or wherever your functions live
+
+async function invokeOtherLambda(projId) {
+  const command = new InvokeCommand({
+    FunctionName:
+      "arn:aws:lambda:us-east-2:776528084998:function:TEMPUS-calculate-unit-price", // or full ARN
+    InvocationType: "RequestResponse", // synchronous — waits for response
+    Payload: JSON.stringify(projId),
+  });
+
+  const response = await lambdaClient.send(command);
+
+  // Payload comes back as a Uint8Array, need to decode
+  const responsePayload = JSON.parse(
+    Buffer.from(response.Payload).toString("utf-8"),
+  );
+  console.log(`responsePayload: ${JSON.stringify(responsePayload)}`);
+  return responsePayload;
 }
 
 async function getSPPRecordFromStore(dataStore, searchObject) {

@@ -132,7 +132,7 @@ async function newBidGridLoad(
             inTable: "Costcenter",
           },
           parentid: {
-            value: matchingPhaseObject.externalid,
+            value: matchingSubPhaseObject.externalid,
             lookupBy: "externalid",
             inTable: "Projecttask",
           },

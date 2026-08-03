@@ -6,7 +6,7 @@ export const handler = async (event) => {
       criteriaObj: {
         projectid: projId,
       },
-      limit: 1000,
+      limit: 100,
     };
     const taskRecords = await callSharedUtil(
       "tslib-getRecords",

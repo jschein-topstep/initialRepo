@@ -1,5 +1,5 @@
 import { parse } from "csv-parse/sync";
-import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
+import { lambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
 
 const sharedPath = process.env.AWS_LAMBDA_FUNCTION_NAME
   ? "/opt/nodejs/sharedUtils.js"
@@ -289,7 +289,7 @@ async function calculateUnitPricePer(projId) {
     Payload: JSON.stringify({ projId }), // adjust shape to match target handler's expected event
   });
 
-  const response = await LambdaClient.send(command);
+  const response = await lambdaClient.send(command);
 
   const responsePayload = JSON.parse(
     Buffer.from(response.Payload).toString("utf-8"),

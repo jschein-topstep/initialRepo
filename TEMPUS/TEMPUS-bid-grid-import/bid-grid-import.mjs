@@ -474,11 +474,11 @@ async function updateBidGridValues(
       field[8] = task.unit_basis__c; // Unit Basis
       field[9] = task.number_units__c; // # of Units
       field[10] = costCenterRecord?.name || ""; // Team
-      field[11] = departmentRecord?.name || ""; // Functional Area
-      field[12] = userRecord.name; // Bid Role
-      field[13] = assignment.planned_hours; // total hours
-      field[14] = assignment.assign_cost__c; // Total Cost
-      field[15] = assignment.assign_bid__c; // Total Bid
+      field[11] = ""; // Functional Area -- blank because no assignment
+      field[12] = ""; // Bid Role -- blank because no assignment
+      field[13] = ""; // total hours -- blank because no assignment
+      field[14] = task.unit_total_cost__c; // Total Cost from Task
+      field[15] = task.unit_total_bid__c; // Total Bid from Task*/
 
       originalCsv += field.map(csvField).join(",") + "\r\n";
     }

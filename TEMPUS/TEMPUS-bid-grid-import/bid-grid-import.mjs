@@ -769,7 +769,7 @@ async function processAssignmentUpdates(
 export const handler = async (event) => {
   const bodyJSON = JSON.parse(event.body);
   const base64 = atob(bodyJSON.base64);
-
+  const fileId = bodyJSON.fileId;
   //const attachmentRecord = await getAttachment(fileId);
 
   //const base64 = atob(attachmentRecord.base64_data);

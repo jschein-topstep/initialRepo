@@ -290,7 +290,7 @@ async function calculateUnitPricePer(projId) {
     FunctionName:
       "arn:aws:lambda:us-east-2:776528084998:function:TEMPUS-calculate-unit-price",
     InvocationType: "RequestResponse",
-    Payload: JSON.stringify({ projId: projId }), // adjust shape to match target handler's expected event
+    Payload: JSON.stringify({ body: JSON.stringify({ projId: projId }) }),
   });
 
   const response = await lambdaClient.send(command); // lowercase — the instance, not the class

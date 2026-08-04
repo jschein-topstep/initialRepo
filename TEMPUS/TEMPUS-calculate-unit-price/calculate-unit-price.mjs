@@ -3,6 +3,14 @@ export const handler = async (event) => {
   console.log(`bodyJSON: ${JSON.stringify(bodyJSON)}`);
   const projId = bodyJSON.projId;
 
+  const authObj = {
+    company: process.env.COMPANY,
+    user: process.env.USER,
+    password: process.env.PASSWORD,
+    instance: process.env.INSTANCE,
+  };
+  const { callSharedUtil } = await import(sharedPath);
+
   async function calculateUnitPricePer(projId) {
     const sppTaskRequest = {
       authObj: authObj,

@@ -768,11 +768,11 @@ async function processAssignmentUpdates(
 
 export const handler = async (event) => {
   const bodyJSON = JSON.parse(event.body);
-  const fileId = bodyJSON.fileId;
+  const base64 = bodyJSON.base64;
 
-  const attachmentRecord = await getAttachment(fileId);
+  //const attachmentRecord = await getAttachment(fileId);
 
-  const base64 = atob(attachmentRecord.base64_data);
+  //const base64 = atob(attachmentRecord.base64_data);
   const fileLines = parse(base64, {
     columns: true,
     skip_empty_lines: true,

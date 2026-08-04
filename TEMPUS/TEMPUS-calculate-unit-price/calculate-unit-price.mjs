@@ -9,6 +9,9 @@ export const handler = async (event) => {
     password: process.env.PASSWORD,
     instance: process.env.INSTANCE,
   };
+  const sharedPath = process.env.AWS_LAMBDA_FUNCTION_NAME
+    ? "/opt/nodejs/sharedUtils.js"
+    : "../../shared/sharedUtils.js";
   const { callSharedUtil } = await import(sharedPath);
 
   async function calculateUnitPricePer(projId) {

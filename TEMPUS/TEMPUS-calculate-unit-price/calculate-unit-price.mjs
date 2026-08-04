@@ -1,4 +1,8 @@
 export const handler = async (event) => {
+  const bodyJSON = JSON.parse(event.body);
+  console.log(`bodyJSON: ${JSON.stringify(bodyJSON)}`);
+  const projId = bodyJSON.projId;
+
   async function calculateUnitPricePer(projId) {
     const sppTaskRequest = {
       authObj: authObj,

@@ -283,6 +283,9 @@ async function newBidGridLoad(
 // calculateUnitPricePer has been migrated to the standalone
 // TEMPUS-calculate-unit-price Lambda function.
 async function calculateUnitPricePer(projId) {
+  console.log(
+    `Invoking TEMPUS-calculate-unit-price Lambda for project ID: ${projId}`,
+  );
   const command = new InvokeCommand({
     FunctionName:
       "arn:aws:lambda:us-east-2:776528084998:function:TEMPUS-calculate-unit-price",

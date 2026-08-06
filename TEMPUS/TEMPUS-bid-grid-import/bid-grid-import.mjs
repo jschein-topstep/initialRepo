@@ -98,7 +98,7 @@ async function newBidGridLoad(
     );
 
     if (matchingSubPhaseObject === undefined) {
-      // the sub-phase has not been encountered yet
+      // the sub-phase has not been encountered yet1
       const subPhaseExtId = `proj${projectRecord.id}_phase${fileLines[i]["Phase"]}_subphase${fileLines[i]["Sub-phase"]}`;
 
       const newSubPhaseObj = {

@@ -71,8 +71,9 @@ async function newBidGridLoad(
   // const deleteResponse = await deleteExistingTasks(projectRecord.id);
 
   for (let i = 0; i < fileLines.length; i++) {
+    let matchingPhaseObject = undefined;
     if (fileLines[i]["Phase"]?.length > 0) {
-      let matchingPhaseObject = phaseObjArray.find(
+      matchingPhaseObject = phaseObjArray.find(
         (phase) => phase.name === fileLines[i]["Phase"],
       );
 
@@ -89,101 +90,102 @@ async function newBidGridLoad(
         phaseObjArray.push(newPhaseObj);
         matchingPhaseObject = newPhaseObj;
       }
-
-      let matchingSubPhaseObject = subPhaseObjArray.find(
-        (subPhase) =>
-          subPhase.externalid ===
-          `proj${projectRecord.id}_phase${fileLines[i]["Phase"]}_subphase${fileLines[i]["Sub-phase"]}`,
-      );
-
-      if (matchingSubPhaseObject === undefined) {
-        // the sub-phase has not been encountered yet
-        const subPhaseExtId = `proj${projectRecord.id}_phase${fileLines[i]["Phase"]}_subphase${fileLines[i]["Sub-phase"]}`;
-        const newSubPhaseObj = {
-          projectid: projectRecord.id,
-          name: fileLines[i]["Sub-phase"],
-          is_a_phase: 1,
-          externalid: subPhaseExtId,
-          parentid: {
-            value: matchingPhaseObject.externalid,
-            lookupBy: "externalid",
-            inTable: "Projecttask",
-          },
-        };
-
-        subPhaseObjArray.push(newSubPhaseObj);
-        matchingSubPhaseObject = newSubPhaseObj;
-      }
-
-      let matchingTaskObject = taskObjArray.find(
-        (task) => task.name === fileLines[i]["Unit Name"],
-      );
-
-      if (matchingTaskObject === undefined) {
-        // the task has not been encountered yet
-        const taskExtId = `proj${projectRecord.id}_task${fileLines[i]["Unit Number"]}`;
-        const newTaskObj = {
-          projectid: projectRecord.id,
-          name: fileLines[i]["Unit Name"],
-          is_a_phase: "",
-          cost_centerid: {
-            value: fileLines[i]["Team"],
-            lookupBy: "name",
-            inTable: "Costcenter",
-          },
-          parentid: {
-            value: matchingSubPhaseObject.externalid,
-            lookupBy: "externalid",
-            inTable: "Projecttask",
-          },
-          unit_budget_cat__c: fileLines[i]["Budget Category"],
-          default_category: {
-            value: fileLines[i]["Item Name"],
-            lookupBy: "name",
-            inTable: "Category",
-          },
-          id_number: fileLines[i]["Unit Number"],
-          unit_basis__c: fileLines[i]["Unit Basis"],
-          number_units__c: fileLines[i]["# of Units"],
-          unit_total_cost__c: fileLines[i]["Total Cost"], // will get overridden if there are task assignments
-          unit_total_bid__c: fileLines[i]["Total Bid"], // will get overridden if there are task assignments
-          projecttask_typeid: 2,
-          externalid: taskExtId,
-        };
-
-        taskObjArray.push(newTaskObj);
-        matchingTaskObject = newTaskObj;
-      }
-
-      if (fileLines[i]["Bid Role"]) {
-        const newAssignmentObj = {
-          projectid: projectRecord.id,
-          projecttaskid: {
-            value: matchingTaskObject.externalid,
-            lookupBy: "externalid",
-            inTable: "Projecttask",
-          },
-          assign_functional_area__c: {
-            value: fileLines[i]["Functional Area"],
-            lookupBy: "name",
-            inTable: "Department",
-          },
-          userid: {
-            value: fileLines[i]["Bid Role"],
-            lookupBy: "name",
-            inTable: "User",
-          },
-          planned_hours:
-            fileLines[i]["Total Hours"] || fileLines[i]["total hours"] || 0,
-          assign_cost__c: fileLines[i]["Total Cost"],
-          assign_bid__c: fileLines[i]["Total Bid"],
-        };
-
-        assignmentObjArray.push(newAssignmentObj);
-      }
-
-      accumulateProjectTotals(fileLines[i], projectCalculations);
     }
+    let matchingSubPhaseObject = subPhaseObjArray.find(
+      (subPhase) =>
+        subPhase.externalid ===
+        `proj${projectRecord.id}_phase${fileLines[i]["Phase"]}_subphase${fileLines[i]["Sub-phase"]}`,
+    );
+
+    if (matchingSubPhaseObject === undefined) {
+      // the sub-phase has not been encountered yet
+      const subPhaseExtId = `proj${projectRecord.id}_phase${fileLines[i]["Phase"]}_subphase${fileLines[i]["Sub-phase"]}`;
+
+      const newSubPhaseObj = {
+        projectid: projectRecord.id,
+        name: fileLines[i]["Sub-phase"],
+        is_a_phase: 1,
+        externalid: subPhaseExtId,
+      };
+      if (matchingPhaseObject !== undefined) {
+        newSubPhaseObj.parentid = {
+          value: matchingPhaseObject.externalid,
+          lookupBy: "externalid",
+          inTable: "Projecttask",
+        };
+      }
+      subPhaseObjArray.push(newSubPhaseObj);
+      matchingSubPhaseObject = newSubPhaseObj;
+    }
+
+    let matchingTaskObject = taskObjArray.find(
+      (task) => task.name === fileLines[i]["Unit Name"],
+    );
+
+    if (matchingTaskObject === undefined) {
+      // the task has not been encountered yet
+      const taskExtId = `proj${projectRecord.id}_task${fileLines[i]["Unit Number"]}`;
+      const newTaskObj = {
+        projectid: projectRecord.id,
+        name: fileLines[i]["Unit Name"],
+        is_a_phase: "",
+        cost_centerid: {
+          value: fileLines[i]["Team"],
+          lookupBy: "name",
+          inTable: "Costcenter",
+        },
+        parentid: {
+          value: matchingSubPhaseObject.externalid,
+          lookupBy: "externalid",
+          inTable: "Projecttask",
+        },
+        unit_budget_cat__c: fileLines[i]["Budget Category"],
+        default_category: {
+          value: fileLines[i]["Item Internal ID"],
+          lookupBy: "netsuite_category_id__c",
+          inTable: "Category",
+        },
+        id_number: fileLines[i]["Unit Number"],
+        unit_basis__c: fileLines[i]["Unit Basis"],
+        number_units__c: fileLines[i]["# of Units"],
+        unit_total_cost__c: fileLines[i]["Total Cost"], // will get overridden if there are task assignments
+        unit_total_bid__c: fileLines[i]["Total Bid"], // will get overridden if there are task assignments
+        projecttask_typeid: 2,
+        externalid: taskExtId,
+      };
+
+      taskObjArray.push(newTaskObj);
+      matchingTaskObject = newTaskObj;
+    }
+
+    if (fileLines[i]["Bid Role"]) {
+      const newAssignmentObj = {
+        projectid: projectRecord.id,
+        projecttaskid: {
+          value: matchingTaskObject.externalid,
+          lookupBy: "externalid",
+          inTable: "Projecttask",
+        },
+        assign_functional_area__c: {
+          value: fileLines[i]["Functional Area"],
+          lookupBy: "name",
+          inTable: "Department",
+        },
+        userid: {
+          value: fileLines[i]["Bid Role"],
+          lookupBy: "name",
+          inTable: "User",
+        },
+        planned_hours:
+          fileLines[i]["Total Hours"] || fileLines[i]["total hours"] || 0,
+        assign_cost__c: fileLines[i]["Total Cost"],
+        assign_bid__c: fileLines[i]["Total Bid"],
+      };
+
+      assignmentObjArray.push(newAssignmentObj);
+    }
+
+    accumulateProjectTotals(fileLines[i], projectCalculations);
   }
 }
 
@@ -593,8 +595,8 @@ async function processTaskUpdates(projectRecord, taskInfo, taskObjArray) {
       },
       unit_budget_cat__c: task.row["Budget Category"],
       default_category: {
-        value: task.row["Item Name"],
-        lookupBy: "name",
+        value: task.row["Item Internal ID"],
+        lookupBy: "netsuite_category_id__c",
         inTable: "Category",
       },
       id_number: task.row["Unit Number"],
@@ -949,11 +951,15 @@ function csvField(value) {
 }
 
 function accumulateProjectTotals(record, projectCalculations) {
-  const totalBid = parseFloat(record["Total Bid"]) || 0;
-  const totalCost = parseFloat(record["Total Cost"]) || 0;
+  const totalBid =
+    parseFloat(String(record["Total Bid"]).replace(/,/g, "")) || 0;
+  const totalCost =
+    parseFloat(String(record["Total Cost"]).replace(/,/g, "")) || 0;
 
   projectCalculations.proj_total_hours__c +=
-    parseFloat(record["Total Hours"]) || parseFloat(record["total hours"]) || 0;
+    parseFloat(String(record["Total Hours"]).replace(/,/g, "")) ||
+    parseFloat(String(record["total hours"]).replace(/,/g, "")) ||
+    0;
 
   if (record["Budget Category"] === "Directs") {
     projectCalculations.proj_directs__c += totalBid;

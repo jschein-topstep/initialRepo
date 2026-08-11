@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ask a Question</title>
+
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        max-width: 800px;
+        margin: 40px auto;
+        padding: 0 20px;
+      }
+
+      textarea {
+        width: 100%;
+        min-height: 120px;
+        box-sizing: border-box;
+        padding: 10px;
+        font-size: 16px;
+      }
+
+      button {
+        margin-top: 10px;
+        padding: 10px 20px;
+        font-size: 16px;
+        cursor: pointer;
+      }
+
+      #result {
+        margin-top: 20px;
+        padding: 15px;
+        border: 1px solid #ccc;
+        min-height: 60px;
+        white-space: pre-wrap;
+        font-family: monospace;
+      }
+    </style>
+  </head>
+
+  <body>
+    <h1>Ask a Question</h1>
+
+    <textarea id="question" placeholder="Enter your question"></textarea>
+
+    <button id="submitButton">Submit</button>
+
+    <div id="result"></div>
+
+    <script>
+      const lambdaUrl =
+        "https://bsblugut2ka2fwqmhluv63pvxm0ybuid.lambda-url.us-east-2.on.aws/";
+
+      const questionElement = document.getElementById("question");
+      const submitButton = document.getElementById("submitButton");
+      const resultElement = document.getElementById("result");
+
+      submitButton.addEventListener("click", submitQuestion);
+
+      async function submitQuestion() {
+        const question = questionElement.value.trim();
+
+        if (!question) {
+          resultElement.textContent = "Enter a question.";
+          return;
+        }
+
+        submitButton.disabled = true;
+        resultElement.textContent = "Submitting question...";
+
+        try {
+          const response = await fetch(lambdaUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              action: "submit",
+              question,
+            }),
+          });
+
+          const data = await readJson(response);
+
+          if (!response.ok) {
+            throw new Error(data.error || `HTTP ${response.status}`);
+          }
+
+          if (!data.requestId) {
+            throw new Error("Lambda did not return a requestId.");
+          }
+
+          resultElement.textContent = "Working...";
+
+          await pollForAnswer(data.requestId);
+        } catch (error) {
+          resultElement.textContent = `Error: ${error.message}`;
+          submitButton.disabled = false;
+        }
+      }
+
+      async function pollForAnswer(requestId) {
+        const maxAttempts = 120;
+        const delayMilliseconds = 2000;
+
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+          await delay(delayMilliseconds);
+
+          const url = `${lambdaUrl}?action=status&requestId=${encodeURIComponent(requestId)}`;
+
+          const response = await fetch(url);
+          const data = await readJson(response);
+
+          if (!response.ok) {
+            throw new Error(data.error || `HTTP ${response.status}`);
+          }
+
+          if (data.status === "complete") {
+            resultElement.textContent =
+              data.answer ?? JSON.stringify(data, null, 2);
+
+            submitButton.disabled = false;
+            return;
+          }
+
+          if (data.status === "failed") {
+            throw new Error(data.error || "The request failed.");
+          }
+
+          resultElement.textContent = "Working...";
+        }
+
+        throw new Error("The request took too long.");
+      }
+
+      async function readJson(response) {
+        const text = await response.text();
+
+        if (!text) {
+          return {};
+        }
+
+        try {
+          return JSON.parse(text);
+        } catch {
+          return {
+            error: `Invalid response from Lambda: ${text}`,
+          };
+        }
+      }
+
+      function delay(milliseconds) {
+        return new Promise((resolve) => setTimeout(resolve, milliseconds));
+      }
+    </script>
+  </body>
+</html>

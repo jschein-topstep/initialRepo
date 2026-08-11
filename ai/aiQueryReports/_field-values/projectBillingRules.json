@@ -1,0 +1,10 @@
+{
+  "project_billing_rule": {
+    "type": {
+      "F": "Fixed Fee",
+      "T": "T&M (Time & Materials)",
+      "P": "Purchase",
+      "E": "Expense"
+    }
+  }
+}

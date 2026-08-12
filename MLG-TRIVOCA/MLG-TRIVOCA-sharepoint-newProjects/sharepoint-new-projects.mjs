@@ -17,6 +17,7 @@ const { callSharedUtil } = await import(sharedPath);
 // Retrieve projects from SPP read (passed via lambda function call)
 export const handler = async (event) => {
   const bodyJSON = JSON.parse(event.body);
+  console.log(`bodyJSON: ${JSON.stringify(bodyJSON)}`);
 };
 
 // Validate the projects retrieved from SPP meet filter criteria (Loop A, first decision)

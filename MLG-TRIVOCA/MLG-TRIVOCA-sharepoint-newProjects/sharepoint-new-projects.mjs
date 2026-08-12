@@ -6,7 +6,7 @@ const sharedPath = process.env.AWS_LAMBDA_FUNCTION_NAME
   ? "/opt/nodejs/sharedUtils.js"
   : "../../shared/sharedUtils.js";
 const { callSharedUtil } = await import(sharedPath);
-
+//may not need spp creds
 /*const authObj = {
   company: process.env.COMPANY,
   user: process.env.USER,

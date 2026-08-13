@@ -31,7 +31,283 @@
         margin: 0;
         height: 100vh;
         display: flex;
+      }
+
+      #sidebar {
+        width: 260px;
+        flex-shrink: 0;
+        background: var(--surface-1);
+        border-right: 1px solid var(--border);
+        display: flex;
         flex-direction: column;
+      }
+
+      #sidebarHeader {
+        padding: 14px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      #newThreadButton {
+        width: 100%;
+        background: var(--accent);
+        color: var(--accent-fg);
+        border: none;
+        border-radius: var(--radius);
+        padding: 10px 12px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        height: auto;
+      }
+
+      #threadList {
+        flex: 1;
+        overflow-y: auto;
+        padding: 8px;
+      }
+
+      .thread-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 9px 10px;
+        border-radius: var(--radius);
+        cursor: pointer;
+        margin-bottom: 2px;
+      }
+
+      .thread-item:hover {
+        background: var(--surface-0);
+      }
+
+      .thread-item.active {
+        background: var(--user-bubble);
+      }
+
+      .thread-title {
+        flex: 1;
+        font-size: 13.5px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .thread-delete {
+        background: none;
+        border: none;
+        color: var(--text-muted);
+        font-size: 15px;
+        cursor: pointer;
+        padding: 0 4px;
+        height: auto;
+        visibility: hidden;
+        line-height: 1;
+      }
+
+      .thread-item:hover .thread-delete {
+        visibility: visible;
+      }
+
+      .thread-empty {
+        color: var(--text-muted);
+        font-size: 13px;
+        padding: 10px;
+      }
+
+      #sidebarFooter {
+        padding: 10px;
+        border-top: 1px solid var(--border);
+      }
+
+      #terminologyButton {
+        width: 100%;
+        background: none;
+        color: var(--text-secondary);
+        border: 1px solid var(--border-strong);
+        border-radius: var(--radius);
+        padding: 9px 12px;
+        font-size: 13.5px;
+        cursor: pointer;
+        height: auto;
+      }
+
+      #terminologyButton:hover {
+        background: var(--surface-0);
+        color: var(--text-primary);
+      }
+
+      .modal-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.35);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10;
+      }
+
+      .modal-overlay.hidden {
+        display: none;
+      }
+
+      .modal-panel {
+        background: var(--surface-1);
+        border-radius: 12px;
+        width: 560px;
+        max-width: 90vw;
+        max-height: 80vh;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+
+      .modal-header {
+        padding: 16px 20px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .modal-header h2 {
+        margin: 0;
+        font-size: 16px;
+        font-weight: 600;
+      }
+
+      .modal-header p {
+        margin: 3px 0 0;
+        font-size: 12.5px;
+        color: var(--text-secondary);
+      }
+
+      .modal-close {
+        background: none;
+        border: none;
+        font-size: 20px;
+        color: var(--text-muted);
+        cursor: pointer;
+        height: auto;
+        padding: 0 4px;
+        line-height: 1;
+      }
+
+      .modal-body {
+        padding: 16px 20px;
+        overflow-y: auto;
+      }
+
+      .term-item {
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 10px 12px;
+        margin-bottom: 8px;
+      }
+
+      .term-item-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 8px;
+      }
+
+      .term-name {
+        font-weight: 600;
+        font-size: 14px;
+      }
+
+      .term-actions {
+        display: flex;
+        gap: 4px;
+        flex-shrink: 0;
+      }
+
+      .term-actions button {
+        background: none;
+        border: none;
+        color: var(--text-muted);
+        font-size: 12.5px;
+        cursor: pointer;
+        height: auto;
+        padding: 2px 6px;
+      }
+
+      .term-actions button:hover {
+        color: var(--text-primary);
+      }
+
+      .term-definition {
+        font-size: 13.5px;
+        color: var(--text-secondary);
+        margin-top: 4px;
+        white-space: pre-wrap;
+      }
+
+      .term-empty {
+        color: var(--text-muted);
+        font-size: 13.5px;
+        padding: 8px 0;
+      }
+
+      .term-form {
+        border-top: 1px solid var(--border);
+        padding: 14px 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .term-form input,
+      .term-form textarea {
+        width: 100%;
+        padding: 8px 10px;
+        font-size: 13.5px;
+        font-family: inherit;
+        border: 1px solid var(--border-strong);
+        border-radius: var(--radius);
+        background: var(--surface-1);
+        color: var(--text-primary);
+        box-sizing: border-box;
+      }
+
+      .term-form textarea {
+        min-height: 60px;
+        resize: vertical;
+      }
+
+      .term-form-row {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+
+      .term-form-row button {
+        padding: 7px 14px;
+        font-size: 13px;
+        height: auto;
+      }
+
+      .term-form-cancel {
+        background: none;
+        border: 1px solid var(--border-strong);
+        color: var(--text-secondary);
+      }
+
+      .term-form-status {
+        font-size: 12.5px;
+        color: var(--text-muted);
+        min-height: 16px;
+      }
+
+      .term-form-status.error {
+        color: #a5402a;
+      }
+
+      #main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
       }
 
       header {
@@ -171,33 +447,116 @@
   </head>
 
   <body>
-    <header>
-      <h1>Ask a question</h1>
-      <p>Ask about your SuiteProjects Pro data. Follow-up questions are welcome.</p>
-    </header>
-
-    <div id="chatWindow">
-      <div class="empty-state" id="emptyState">Ask a question to get started.</div>
+    <div id="sidebar">
+      <div id="sidebarHeader">
+        <button id="newThreadButton">+ New chat</button>
+      </div>
+      <div id="threadList"></div>
+      <div id="sidebarFooter">
+        <button id="terminologyButton">Terminology</button>
+      </div>
     </div>
 
-    <footer>
-      <div id="inputRow">
-        <textarea id="question" placeholder="Ask a question..." rows="1"></textarea>
-        <button id="submitButton">Send</button>
+    <div class="modal-overlay hidden" id="terminologyModal">
+      <div class="modal-panel">
+        <div class="modal-header">
+          <div>
+            <h2>Terminology</h2>
+            <p>
+              Definitions used by everyone asking questions on this instance.
+            </p>
+          </div>
+          <button class="modal-close" id="terminologyClose">&times;</button>
+        </div>
+        <div class="modal-body" id="termList"></div>
+        <div class="term-form">
+          <input
+            type="text"
+            id="termInput"
+            placeholder="Term (e.g. utilization rate)" />
+          <textarea id="definitionInput" placeholder="Definition"></textarea>
+          <div class="term-form-status" id="termFormStatus"></div>
+          <div class="term-form-row">
+            <button type="button" class="term-form-cancel" id="termFormCancel">
+              Cancel
+            </button>
+            <button type="button" id="termFormSave">Save term</button>
+          </div>
+        </div>
       </div>
-      <div id="hint">Enter to send &middot; Shift+Enter for a new line</div>
-    </footer>
+    </div>
+
+    <div id="main">
+      <header>
+        <h1>Ask a question</h1>
+        <p>
+          Ask about your SuiteProjects Pro data. Follow-up questions are
+          welcome.
+        </p>
+      </header>
+
+      <div id="chatWindow">
+        <div class="empty-state" id="emptyState">
+          Ask a question to get started.
+        </div>
+      </div>
+
+      <footer>
+        <div id="inputRow">
+          <textarea
+            id="question"
+            placeholder="Ask a question..."
+            rows="1"></textarea>
+          <button id="submitButton">Send</button>
+        </div>
+        <div id="hint">Enter to send &middot; Shift+Enter for a new line</div>
+      </footer>
+    </div>
 
     <script>
       const lambdaUrl =
         "https://bsblugut2ka2fwqmhluv63pvxm0ybuid.lambda-url.us-east-2.on.aws/";
 
-      const sessionId = getOrCreateSessionId();
+      const THREADS_KEY = "spp-chat-threads";
+      const MAX_TITLE_LENGTH = 42;
 
       const chatWindow = document.getElementById("chatWindow");
-      const emptyState = document.getElementById("emptyState");
       const questionElement = document.getElementById("question");
       const submitButton = document.getElementById("submitButton");
+      const threadListElement = document.getElementById("threadList");
+      const newThreadButton = document.getElementById("newThreadButton");
+
+      const terminologyButton = document.getElementById("terminologyButton");
+      const terminologyModal = document.getElementById("terminologyModal");
+      const terminologyClose = document.getElementById("terminologyClose");
+      const termList = document.getElementById("termList");
+      const termInput = document.getElementById("termInput");
+      const definitionInput = document.getElementById("definitionInput");
+      const termFormStatus = document.getElementById("termFormStatus");
+      const termFormSave = document.getElementById("termFormSave");
+      const termFormCancel = document.getElementById("termFormCancel");
+
+      let editingTerm = null; // original term name being edited, or null for a new one
+
+      terminologyButton.addEventListener("click", openTerminologyModal);
+      terminologyClose.addEventListener("click", closeTerminologyModal);
+      terminologyModal.addEventListener("click", (event) => {
+        if (event.target === terminologyModal) closeTerminologyModal();
+      });
+      termFormCancel.addEventListener("click", resetTermForm);
+      termFormSave.addEventListener("click", handleSaveTerm);
+
+      let threads = loadThreads();
+      let activeThreadId = threads.length > 0 ? threads[0].sessionId : null;
+
+      if (!activeThreadId) {
+        activeThreadId = startNewThread(false);
+      }
+
+      renderThreadList();
+      renderActiveThread();
+
+      newThreadButton.addEventListener("click", () => startNewThread(true));
 
       submitButton.addEventListener("click", submitQuestion);
 
@@ -217,7 +576,16 @@
         const question = questionElement.value.trim();
         if (!question) return;
 
-        emptyState.remove();
+        const shortcutMatch = question.match(/^definition:\s*(.+)$/i);
+        if (shortcutMatch) {
+          await handleDefinitionShortcut(shortcutMatch[1]);
+          return;
+        }
+
+        const thread = getActiveThread();
+
+        const currentEmptyState = document.getElementById("emptyState");
+        if (currentEmptyState) currentEmptyState.remove();
 
         addBubble("question", question);
         const answerBubble = addBubble("answer pending", "Working...");
@@ -227,11 +595,27 @@
         questionElement.disabled = true;
         submitButton.disabled = true;
 
+        // Reserve the turn now so a page reload mid-request doesn't lose the
+        // question, then fill in the answer (or an error) once we have it.
+        const turnIndex = thread.messages.length;
+        thread.messages.push({ question, answer: null });
+        if (thread.messages.length === 1) {
+          thread.title =
+            question.slice(0, MAX_TITLE_LENGTH) +
+            (question.length > MAX_TITLE_LENGTH ? "…" : "");
+        }
+        saveThreads();
+        renderThreadList();
+
         try {
           const response = await fetch(lambdaUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action: "submit", question, sessionId }),
+            body: JSON.stringify({
+              action: "submit",
+              question,
+              sessionId: thread.sessionId,
+            }),
           });
 
           const data = await readJson(response);
@@ -243,9 +627,14 @@
             throw new Error("Lambda did not return a requestId.");
           }
 
-          await pollForAnswer(data.requestId, answerBubble);
+          const answer = await pollForAnswer(data.requestId, answerBubble);
+          thread.messages[turnIndex].answer = answer;
+          saveThreads();
         } catch (error) {
           setBubbleError(answerBubble, `Error: ${error.message}`);
+          thread.messages[turnIndex].answer = `Error: ${error.message}`;
+          thread.messages[turnIndex].isError = true;
+          saveThreads();
         } finally {
           questionElement.disabled = false;
           submitButton.disabled = false;
@@ -269,8 +658,9 @@
           }
 
           if (data.status === "complete") {
-            setBubbleAnswer(answerBubble, data.answer ?? JSON.stringify(data, null, 2));
-            return;
+            const answer = data.answer ?? JSON.stringify(data, null, 2);
+            setBubbleAnswer(answerBubble, answer);
+            return answer;
           }
 
           if (data.status === "failed") {
@@ -284,11 +674,13 @@
       function addBubble(kind, text) {
         const turn = document.createElement("div");
         turn.className = "turn row";
-        turn.style.justifyContent = kind === "question" ? "flex-end" : "flex-start";
+        turn.style.justifyContent =
+          kind === "question" ? "flex-end" : "flex-start";
 
         const bubble = document.createElement("div");
         bubble.className = `bubble bubble-${kind.startsWith("answer") ? "answer" : "question"}`;
         if (kind.includes("pending")) bubble.classList.add("pending");
+        if (kind.includes("error")) bubble.classList.add("error");
         bubble.textContent = text;
 
         turn.appendChild(bubble);
@@ -337,14 +729,375 @@
         });
       }
 
-      function getOrCreateSessionId() {
-        const key = "spp-chat-session-id";
-        let id = sessionStorage.getItem(key);
-        if (!id) {
-          id = generateId();
-          sessionStorage.setItem(key, id);
+      /**
+       * Thread storage (client-side only, in localStorage). Each thread is
+       * its own conversation session with the backend. Reopening an old
+       * thread replays the transcript here, but the server-side follow-up
+       * context tied to that sessionId may have already expired -- this
+       * only restores what's shown on screen, not backend memory.
+       */
+
+      function loadThreads() {
+        try {
+          const raw = localStorage.getItem(THREADS_KEY);
+          const parsed = raw ? JSON.parse(raw) : [];
+          return Array.isArray(parsed) ? parsed : [];
+        } catch {
+          return [];
         }
-        return id;
+      }
+
+      function saveThreads() {
+        try {
+          localStorage.setItem(THREADS_KEY, JSON.stringify(threads));
+        } catch (error) {
+          console.error("Could not save threads to localStorage:", error);
+        }
+      }
+
+      function getActiveThread() {
+        return threads.find((t) => t.sessionId === activeThreadId);
+      }
+
+      function startNewThread(switchToIt) {
+        const thread = {
+          sessionId: generateId(),
+          title: "New chat",
+          createdAt: Date.now(),
+          messages: [],
+        };
+        threads.unshift(thread);
+        saveThreads();
+
+        if (switchToIt) {
+          activeThreadId = thread.sessionId;
+          renderThreadList();
+          renderActiveThread();
+        }
+
+        return thread.sessionId;
+      }
+
+      function switchThread(sessionId) {
+        if (sessionId === activeThreadId) return;
+        activeThreadId = sessionId;
+        renderThreadList();
+        renderActiveThread();
+      }
+
+      function deleteThread(sessionId, event) {
+        event.stopPropagation();
+
+        threads = threads.filter((t) => t.sessionId !== sessionId);
+        saveThreads();
+
+        if (sessionId === activeThreadId) {
+          activeThreadId =
+            threads.length > 0 ? threads[0].sessionId : startNewThread(false);
+        }
+
+        renderThreadList();
+        renderActiveThread();
+      }
+
+      function renderThreadList() {
+        threadListElement.innerHTML = "";
+
+        if (threads.length === 0) {
+          const empty = document.createElement("div");
+          empty.className = "thread-empty";
+          empty.textContent = "No past chats yet.";
+          threadListElement.appendChild(empty);
+          return;
+        }
+
+        for (const thread of threads) {
+          const item = document.createElement("div");
+          item.className =
+            "thread-item" +
+            (thread.sessionId === activeThreadId ? " active" : "");
+          item.addEventListener("click", () => switchThread(thread.sessionId));
+
+          const title = document.createElement("div");
+          title.className = "thread-title";
+          title.textContent = thread.title || "New chat";
+
+          const deleteBtn = document.createElement("button");
+          deleteBtn.className = "thread-delete";
+          deleteBtn.textContent = "×";
+          deleteBtn.title = "Delete chat";
+          deleteBtn.addEventListener("click", (event) =>
+            deleteThread(thread.sessionId, event),
+          );
+
+          item.appendChild(title);
+          item.appendChild(deleteBtn);
+          threadListElement.appendChild(item);
+        }
+      }
+
+      function renderActiveThread() {
+        const thread = getActiveThread();
+        chatWindow.innerHTML = "";
+
+        if (!thread || thread.messages.length === 0) {
+          const empty = document.createElement("div");
+          empty.className = "empty-state";
+          empty.id = "emptyState";
+          empty.textContent = "Ask a question to get started.";
+          chatWindow.appendChild(empty);
+          return;
+        }
+
+        for (const message of thread.messages) {
+          addBubble("question", message.question);
+
+          if (message.answer === null || message.answer === undefined) {
+            addBubble("answer pending", "Working...");
+          } else if (message.isError) {
+            addBubble("answer error", message.answer);
+          } else {
+            addBubble("answer", message.answer);
+          }
+        }
+      }
+      /**
+       * "definition: term = definition" quick-capture shortcut. Intercepted
+       * before it ever reaches Celigo -- this saves to the terminology
+       * table directly and shows a confirmation bubble in the current
+       * thread, rather than being treated as a real question.
+       */
+      async function handleDefinitionShortcut(rest) {
+        const currentEmptyState = document.getElementById("emptyState");
+        if (currentEmptyState) currentEmptyState.remove();
+
+        const original = questionElement.value;
+        questionElement.value = "";
+        questionElement.style.height = "auto";
+
+        addBubble("question", original.trim());
+        const responseBubble = addBubble(
+          "answer pending",
+          "Saving definition...",
+        );
+
+        const separatorIndex = rest.indexOf("=");
+        if (separatorIndex === -1) {
+          setBubbleError(
+            responseBubble,
+            'Use the format: definition: term = definition (e.g. "definition: utilization rate = billable hours / total available hours"). You can also manage terms from the Terminology panel.',
+          );
+          return;
+        }
+
+        const term = rest.slice(0, separatorIndex).trim();
+        const definition = rest.slice(separatorIndex + 1).trim();
+
+        if (!term || !definition) {
+          setBubbleError(
+            responseBubble,
+            "Both a term and a definition are required.",
+          );
+          return;
+        }
+
+        questionElement.disabled = true;
+        submitButton.disabled = true;
+
+        try {
+          await apiSaveDefinition(term, definition);
+          setBubbleAnswer(
+            responseBubble,
+            `Saved definition for "${term}". This applies to everyone asking questions on this instance.`,
+          );
+        } catch (error) {
+          setBubbleError(responseBubble, `Error: ${error.message}`);
+        } finally {
+          questionElement.disabled = false;
+          submitButton.disabled = false;
+          questionElement.focus();
+        }
+      }
+
+      /**
+       * Terminology modal: list, add, edit, delete. Backed directly by the
+       * TERMS_TABLE via the orchestrator Lambda -- not tied to any thread.
+       */
+
+      async function openTerminologyModal() {
+        terminologyModal.classList.remove("hidden");
+        resetTermForm();
+        await refreshTermList();
+      }
+
+      function closeTerminologyModal() {
+        terminologyModal.classList.add("hidden");
+      }
+
+      function resetTermForm() {
+        editingTerm = null;
+        termInput.value = "";
+        termInput.disabled = false;
+        definitionInput.value = "";
+        termFormStatus.textContent = "";
+        termFormStatus.classList.remove("error");
+        termFormSave.textContent = "Save term";
+      }
+
+      async function refreshTermList() {
+        termList.innerHTML = '<div class="term-empty">Loading...</div>';
+
+        try {
+          const definitions = await apiListDefinitions();
+          renderTermList(definitions);
+        } catch (error) {
+          termList.innerHTML = "";
+          const errorDiv = document.createElement("div");
+          errorDiv.className = "term-empty";
+          errorDiv.textContent = `Could not load terms: ${error.message}`;
+          termList.appendChild(errorDiv);
+        }
+      }
+
+      function renderTermList(definitions) {
+        termList.innerHTML = "";
+
+        if (!definitions || definitions.length === 0) {
+          const empty = document.createElement("div");
+          empty.className = "term-empty";
+          empty.textContent = "No terms defined yet. Add one below.";
+          termList.appendChild(empty);
+          return;
+        }
+
+        for (const entry of definitions) {
+          const item = document.createElement("div");
+          item.className = "term-item";
+
+          const header = document.createElement("div");
+          header.className = "term-item-header";
+
+          const name = document.createElement("div");
+          name.className = "term-name";
+          name.textContent = entry.term;
+
+          const actions = document.createElement("div");
+          actions.className = "term-actions";
+
+          const editBtn = document.createElement("button");
+          editBtn.textContent = "Edit";
+          editBtn.addEventListener("click", () => startEditTerm(entry));
+
+          const deleteBtn = document.createElement("button");
+          deleteBtn.textContent = "Delete";
+          deleteBtn.addEventListener("click", () =>
+            handleDeleteTerm(entry.term),
+          );
+
+          actions.appendChild(editBtn);
+          actions.appendChild(deleteBtn);
+          header.appendChild(name);
+          header.appendChild(actions);
+
+          const definition = document.createElement("div");
+          definition.className = "term-definition";
+          definition.textContent = entry.definition;
+
+          item.appendChild(header);
+          item.appendChild(definition);
+          termList.appendChild(item);
+        }
+      }
+
+      function startEditTerm(entry) {
+        editingTerm = entry.term;
+        termInput.value = entry.term;
+        termInput.disabled = true; // renaming = delete old + add new, keep it simple for now
+        definitionInput.value = entry.definition;
+        termFormStatus.textContent = "";
+        termFormStatus.classList.remove("error");
+        termFormSave.textContent = "Update term";
+        definitionInput.focus();
+      }
+
+      async function handleSaveTerm() {
+        const term = termInput.value.trim();
+        const definition = definitionInput.value.trim();
+
+        if (!term || !definition) {
+          termFormStatus.textContent =
+            "Both a term and a definition are required.";
+          termFormStatus.classList.add("error");
+          return;
+        }
+
+        termFormSave.disabled = true;
+        termFormStatus.textContent = "Saving...";
+        termFormStatus.classList.remove("error");
+
+        try {
+          await apiSaveDefinition(term, definition);
+          resetTermForm();
+          await refreshTermList();
+        } catch (error) {
+          termFormStatus.textContent = `Error: ${error.message}`;
+          termFormStatus.classList.add("error");
+        } finally {
+          termFormSave.disabled = false;
+        }
+      }
+
+      async function handleDeleteTerm(term) {
+        if (
+          !confirm(
+            `Delete the definition for "${term}"? This affects everyone using this instance.`,
+          )
+        ) {
+          return;
+        }
+
+        try {
+          await apiDeleteDefinition(term);
+          if (editingTerm === term) resetTermForm();
+          await refreshTermList();
+        } catch (error) {
+          alert(`Could not delete "${term}": ${error.message}`);
+        }
+      }
+
+      async function apiListDefinitions() {
+        const response = await fetch(`${lambdaUrl}?action=definitions`);
+        const data = await readJson(response);
+        if (!response.ok) {
+          throw new Error(data.error || `HTTP ${response.status}`);
+        }
+        return data.definitions ?? [];
+      }
+
+      async function apiSaveDefinition(term, definition) {
+        const response = await fetch(lambdaUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "saveDefinition", term, definition }),
+        });
+        const data = await readJson(response);
+        if (!response.ok) {
+          throw new Error(data.error || `HTTP ${response.status}`);
+        }
+        return data;
+      }
+
+      async function apiDeleteDefinition(term) {
+        const response = await fetch(lambdaUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "deleteDefinition", term }),
+        });
+        const data = await readJson(response);
+        if (!response.ok) {
+          throw new Error(data.error || `HTTP ${response.status}`);
+        }
+        return data;
       }
     </script>
   </body>

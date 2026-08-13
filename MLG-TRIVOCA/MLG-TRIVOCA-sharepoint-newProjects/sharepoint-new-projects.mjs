@@ -28,8 +28,18 @@ export const handler = async (event) => {
     // QUAL or QUANT?
     if (project.proj_Division__c === "QUAL") {
       console.log(`QUAL project: ${project.name}`);
+      createFoldersInSharepointQUAL(project, token).catch((error) => {
+        console.error(
+          `Error creating folders for project ${project.name}: ${error.message}`,
+        );
+      });
     } else if (project.proj_Division__c === "QUANT") {
       console.log(`QUANT project: ${project.name}`);
+      createFoldersInSharepointQUANT(project, token).catch((error) => {
+        console.error(
+          `Error creating folders for project ${project.name}: ${error.message}`,
+        );
+      });
     } else {
       console.log(`No QUAL or QUANT projects found`);
     }

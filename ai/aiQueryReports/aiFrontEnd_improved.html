@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ask a Question</title>
+
+    <style>
+      :root {
+        --border: #d9d9d6;
+        --border-strong: #c2c2be;
+        --text-primary: #1f1f1d;
+        --text-secondary: #6b6b66;
+        --text-muted: #9a9a95;
+        --surface-0: #f4f3ef;
+        --surface-1: #ffffff;
+        --accent: #2f5d50;
+        --accent-fg: #ffffff;
+        --user-bubble: #eef1ee;
+        --radius: 10px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+        background: var(--surface-0);
+        color: var(--text-primary);
+        margin: 0;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+
+      header {
+        padding: 16px 24px;
+        border-bottom: 1px solid var(--border);
+        background: var(--surface-1);
+        flex-shrink: 0;
+      }
+
+      header h1 {
+        margin: 0;
+        font-size: 17px;
+        font-weight: 600;
+      }
+
+      header p {
+        margin: 2px 0 0;
+        font-size: 13px;
+        color: var(--text-secondary);
+      }
+
+      #chatWindow {
+        flex: 1;
+        overflow-y: auto;
+        padding: 24px;
+        max-width: 760px;
+        width: 100%;
+        margin: 0 auto;
+      }
+
+      .empty-state {
+        color: var(--text-muted);
+        font-size: 14px;
+        text-align: center;
+        margin-top: 60px;
+      }
+
+      .turn {
+        margin-bottom: 20px;
+      }
+
+      .bubble {
+        max-width: 80%;
+        padding: 10px 14px;
+        border-radius: var(--radius);
+        font-size: 15px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+      }
+
+      .bubble-question {
+        background: var(--user-bubble);
+        margin-left: auto;
+        border-bottom-right-radius: 3px;
+      }
+
+      .bubble-answer {
+        background: var(--surface-1);
+        border: 1px solid var(--border);
+        margin-right: auto;
+        border-bottom-left-radius: 3px;
+      }
+
+      .bubble-answer.pending {
+        color: var(--text-secondary);
+        font-style: italic;
+      }
+
+      .bubble-answer.error {
+        border-color: #d47a6a;
+        color: #a5402a;
+      }
+
+      .row {
+        display: flex;
+      }
+
+      footer {
+        border-top: 1px solid var(--border);
+        background: var(--surface-1);
+        padding: 14px 24px;
+        flex-shrink: 0;
+      }
+
+      #inputRow {
+        max-width: 760px;
+        margin: 0 auto;
+        display: flex;
+        gap: 10px;
+        align-items: flex-end;
+      }
+
+      textarea {
+        flex: 1;
+        resize: none;
+        min-height: 44px;
+        max-height: 160px;
+        padding: 10px 12px;
+        font-size: 15px;
+        font-family: inherit;
+        border: 1px solid var(--border-strong);
+        border-radius: var(--radius);
+        background: var(--surface-1);
+        color: var(--text-primary);
+      }
+
+      textarea:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+
+      button {
+        padding: 10px 18px;
+        font-size: 15px;
+        font-weight: 500;
+        cursor: pointer;
+        border: none;
+        border-radius: var(--radius);
+        background: var(--accent);
+        color: var(--accent-fg);
+        height: 44px;
+      }
+
+      button:disabled {
+        background: var(--border-strong);
+        cursor: default;
+      }
+
+      #hint {
+        max-width: 760px;
+        margin: 6px auto 0;
+        font-size: 12px;
+        color: var(--text-muted);
+      }
+    </style>
+  </head>
+
+  <body>
+    <header>
+      <h1>Ask a question</h1>
+      <p>Ask about your SuiteProjects Pro data. Follow-up questions are welcome.</p>
+    </header>
+
+    <div id="chatWindow">
+      <div class="empty-state" id="emptyState">Ask a question to get started.</div>
+    </div>
+
+    <footer>
+      <div id="inputRow">
+        <textarea id="question" placeholder="Ask a question..." rows="1"></textarea>
+        <button id="submitButton">Send</button>
+      </div>
+      <div id="hint">Enter to send &middot; Shift+Enter for a new line</div>
+    </footer>
+
+    <script>
+      const lambdaUrl =
+        "https://bsblugut2ka2fwqmhluv63pvxm0ybuid.lambda-url.us-east-2.on.aws/";
+
+      const sessionId = getOrCreateSessionId();
+
+      const chatWindow = document.getElementById("chatWindow");
+      const emptyState = document.getElementById("emptyState");
+      const questionElement = document.getElementById("question");
+      const submitButton = document.getElementById("submitButton");
+
+      submitButton.addEventListener("click", submitQuestion);
+
+      questionElement.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" && !event.shiftKey) {
+          event.preventDefault();
+          submitQuestion();
+        }
+      });
+
+      questionElement.addEventListener("input", () => {
+        questionElement.style.height = "auto";
+        questionElement.style.height = `${Math.min(questionElement.scrollHeight, 160)}px`;
+      });
+
+      async function submitQuestion() {
+        const question = questionElement.value.trim();
+        if (!question) return;
+
+        emptyState.remove();
+
+        addBubble("question", question);
+        const answerBubble = addBubble("answer pending", "Working...");
+
+        questionElement.value = "";
+        questionElement.style.height = "auto";
+        questionElement.disabled = true;
+        submitButton.disabled = true;
+
+        try {
+          const response = await fetch(lambdaUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "submit", question, sessionId }),
+          });
+
+          const data = await readJson(response);
+
+          if (!response.ok) {
+            throw new Error(data.error || `HTTP ${response.status}`);
+          }
+          if (!data.requestId) {
+            throw new Error("Lambda did not return a requestId.");
+          }
+
+          await pollForAnswer(data.requestId, answerBubble);
+        } catch (error) {
+          setBubbleError(answerBubble, `Error: ${error.message}`);
+        } finally {
+          questionElement.disabled = false;
+          submitButton.disabled = false;
+          questionElement.focus();
+        }
+      }
+
+      async function pollForAnswer(requestId, answerBubble) {
+        const maxAttempts = 120;
+        const delayMilliseconds = 2000;
+
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+          await delay(delayMilliseconds);
+
+          const url = `${lambdaUrl}?action=status&requestId=${encodeURIComponent(requestId)}`;
+          const response = await fetch(url);
+          const data = await readJson(response);
+
+          if (!response.ok) {
+            throw new Error(data.error || `HTTP ${response.status}`);
+          }
+
+          if (data.status === "complete") {
+            setBubbleAnswer(answerBubble, data.answer ?? JSON.stringify(data, null, 2));
+            return;
+          }
+
+          if (data.status === "failed") {
+            throw new Error(data.error || "The request failed.");
+          }
+        }
+
+        throw new Error("The request took too long.");
+      }
+
+      function addBubble(kind, text) {
+        const turn = document.createElement("div");
+        turn.className = "turn row";
+        turn.style.justifyContent = kind === "question" ? "flex-end" : "flex-start";
+
+        const bubble = document.createElement("div");
+        bubble.className = `bubble bubble-${kind.startsWith("answer") ? "answer" : "question"}`;
+        if (kind.includes("pending")) bubble.classList.add("pending");
+        bubble.textContent = text;
+
+        turn.appendChild(bubble);
+        chatWindow.appendChild(turn);
+        chatWindow.scrollTop = chatWindow.scrollHeight;
+        return bubble;
+      }
+
+      function setBubbleAnswer(bubble, text) {
+        bubble.classList.remove("pending");
+        bubble.textContent = text;
+        chatWindow.scrollTop = chatWindow.scrollHeight;
+      }
+
+      function setBubbleError(bubble, text) {
+        bubble.classList.remove("pending");
+        bubble.classList.add("error");
+        bubble.textContent = text;
+        chatWindow.scrollTop = chatWindow.scrollHeight;
+      }
+
+      async function readJson(response) {
+        const text = await response.text();
+        if (!text) return {};
+        try {
+          return JSON.parse(text);
+        } catch {
+          return { error: `Invalid response from Lambda: ${text}` };
+        }
+      }
+
+      function delay(milliseconds) {
+        return new Promise((resolve) => setTimeout(resolve, milliseconds));
+      }
+
+      function generateId() {
+        if (window.crypto && typeof window.crypto.randomUUID === "function") {
+          return window.crypto.randomUUID();
+        }
+        // Fallback for non-secure contexts (e.g. file:// or plain http://)
+        // where crypto.randomUUID is not exposed by the browser.
+        return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+          const r = (Math.random() * 16) | 0;
+          const v = c === "x" ? r : (r & 0x3) | 0x8;
+          return v.toString(16);
+        });
+      }
+
+      function getOrCreateSessionId() {
+        const key = "spp-chat-session-id";
+        let id = sessionStorage.getItem(key);
+        if (!id) {
+          id = generateId();
+          sessionStorage.setItem(key, id);
+        }
+        return id;
+      }
+    </script>
+  </body>
+</html>

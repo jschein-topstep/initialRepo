@@ -13,6 +13,7 @@ const DATA_PREFIX = "spp-data";
 const basePath = `s3://${BUCKET}/${DATA_PREFIX}/${instanceName}`;
 
 const REPORT_VIEWS = {
+  charges: `${basePath}/slip.csv`,
   customers: `${basePath}/customer.csv`,
   invoices: `${basePath}/invoice.csv`,
   projectBillingRules: `${basePath}/project_billing_rule.csv`,
@@ -29,6 +30,11 @@ const REPORT_VIEWS = {
 const FIELD_VALUES_PREFIX = `${basePath}/_field-values`;
 
 const RELATIONSHIPS = {
+  "charges.customer_id": { table: "customers", column: "id" },
+  "charges.invoice_id": { table: "invoices", column: "id" },
+  "charges.project_id": { table: "projects", column: "id" },
+  "charges.project_task_id": { table: "tasks", column: "id" },
+  "charges.user_id": { table: "users", column: "id" },
   "invoices.customer_id": { table: "customers", column: "id" },
   "projectBillingRules.customer_id": { table: "customers", column: "id" },
   "projectBillingRules.project_id": { table: "projects", column: "id" },

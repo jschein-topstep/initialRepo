@@ -283,7 +283,7 @@ async function getGraphToken() {
 
   const params = new URLSearchParams({
     client_id: "82c08c90-bc61-4af4-ad27-7f7e3d838c1c",
-    client_secret: "668099ae-5179-4f82-98d4-faacaff4dba6",
+    client_secret: "A3H8Q~Wo~wbycVR4j4PDSg6mKtkka.HH26z5.cQF",
     scope: "https://graph.microsoft.com/.default",
     grant_type: "client_credentials",
   });

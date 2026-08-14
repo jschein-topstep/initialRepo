@@ -26,14 +26,14 @@ export const handler = async (event) => {
   const token = await getGraphToken();
   bodyJSON.projects.forEach((project) => {
     // QUAL or QUANT?
-    if (project.proj_Division__c === "QUAL") {
+    if (project.proj_Division__c === "Qual") {
       console.log(`QUAL project: ${project.name}`);
       createFoldersInSharepointQUAL(project, token).catch((error) => {
         console.error(
           `Error creating folders for project ${project.name}: ${error.message}`,
         );
       });
-    } else if (project.proj_Division__c === "QUANT") {
+    } else if (project.proj_Division__c === "Quant") {
       console.log(`QUANT project: ${project.name}`);
       createFoldersInSharepointQUANT(project, token).catch((error) => {
         console.error(

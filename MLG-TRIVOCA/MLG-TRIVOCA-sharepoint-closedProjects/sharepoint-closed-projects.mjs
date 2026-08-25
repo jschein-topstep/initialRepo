@@ -27,7 +27,6 @@ export const handler = async (event) => {
   await Promise.all(
     bodyJSON.projects.map(async (project) => {
       const ownerId = await getUserId(token, "anthony.flores@trivoca.com");
-      const teamId = await newSharepointTeam(token, project.name, ownerId);
 
       if (project.proj_Division__c === "Qual" && project.active != 1) {
         console.log(`QUAL project: ${project.name}`);

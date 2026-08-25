@@ -159,3 +159,48 @@ async function deleteClientListSubfolder(project, token) {
   );
   return { deleted: true, itemId: clientListFolder.id };
 }
+async function getGraphToken() {
+  const url = `https://login.microsoftonline.com/07df17c1-4112-495c-b15f-76a25f844f3d/oauth2/v2.0/token`;
+
+  const params = new URLSearchParams({
+    client_id: "82c08c90-bc61-4af4-ad27-7f7e3d838c1c",
+    client_secret: "A3H8Q~Wo~wbycVR4j4PDSg6mKtkka.HH26z5.cQF",
+    scope: "https://graph.microsoft.com/.default",
+    grant_type: "client_credentials",
+  });
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: params,
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(`Token request failed: ${JSON.stringify(data)}`);
+  } else {
+    console.log(`Token request successful: ${JSON.stringify(data)}`);
+  }
+
+  return data.access_token;
+}
+async function getUserId(token, upnOrEmail) {
+  const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
+
+  const res = await fetch(
+    `${GRAPH_BASE}/users/${encodeURIComponent(upnOrEmail)}?$select=id,displayName,userPrincipalName`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(
+      `Failed to resolve user "${upnOrEmail}": ${JSON.stringify(data)}`,
+    );
+  }
+
+  console.log(`Resolved user: ${data.userPrincipalName} -> id: ${data.id}`);
+  return data.id;
+}

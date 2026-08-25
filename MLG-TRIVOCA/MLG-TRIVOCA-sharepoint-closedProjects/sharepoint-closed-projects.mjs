@@ -44,7 +44,7 @@ export const handler = async (event) => {
 // Validate the projects retrieved from SPP meet filter criteria (Loop B, first decision)
 async function projectFilterValidation(projects) {}
 
-// Delete the Client List subfolder in Sharepoint for each CLOSED project (Loop B, Yes branch, first action)
+// Delete the client lists subfolder in Sharepoint for each CLOSED project (Loop B, Yes branch, first action)
 async function deleteClientListSubfolder(project, token) {
   const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
   const hostname = "trivocahealth.sharepoint.com";
@@ -115,7 +115,7 @@ async function deleteClientListSubfolder(project, token) {
     return { deleted: false };
   }
 
-  // Find "Client List" within the project folder
+  // Find "client lists" within the project folder
   const subListRes = await fetch(
     `${GRAPH_BASE}/drives/${driveId}/items/${projectFolder.id}/children`,
     { headers },
@@ -127,12 +127,12 @@ async function deleteClientListSubfolder(project, token) {
     );
 
   const clientListFolder = subListData.value.find(
-    (item) => item.folder && item.name === "Client List",
+    (item) => item.folder && item.name === "Client Lists",
   );
 
   if (!clientListFolder) {
     console.log(
-      `"Client List" folder not found under "${project.name}" — nothing to delete.`,
+      `"Client Lists" folder not found under "${project.name}" — nothing to delete.`,
     );
     return { deleted: false };
   }
@@ -149,12 +149,12 @@ async function deleteClientListSubfolder(project, token) {
   if (deleteRes.status !== 204) {
     const errBody = await deleteRes.text();
     throw new Error(
-      `Failed to delete "Client List" for "${project.name}": ${deleteRes.status} ${errBody}`,
+      `Failed to delete "client lists" for "${project.name}": ${deleteRes.status} ${errBody}`,
     );
   }
 
   console.log(
-    `Deleted "Client List" folder for project "${project.name}" (item ID: ${clientListFolder.id})`,
+    `Deleted "client lists" folder for project "${project.name}" (item ID: ${clientListFolder.id})`,
   );
   return { deleted: true, itemId: clientListFolder.id };
 }

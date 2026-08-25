@@ -1,4 +1,3 @@
-import { parse } from "csv-parse/sync";
 import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
 
 const lambdaClient = new LambdaClient({ region: "us-east-2" });

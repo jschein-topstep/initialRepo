@@ -17,10 +17,146 @@ const { callSharedUtil } = await import(sharedPath);
 // Retrieve projects from SPP read (passed via lambda function call)
 export const handler = async (event) => {
   const bodyJSON = JSON.parse(event.body);
+  console.log(`bodyJSON: ${JSON.stringify(bodyJSON)}`);
+
+  if (!Array.isArray(bodyJSON.projects) || bodyJSON.projects.length === 0) {
+    console.log("No projects in payload");
+    return;
+  }
+  const token = await getGraphToken();
+
+  await Promise.all(
+    bodyJSON.projects.map(async (project) => {
+      const ownerId = await getUserId(token, "anthony.flores@trivoca.com");
+      const teamId = await newSharepointTeam(token, project.name, ownerId);
+
+      if (project.proj_Division__c === "Qual" && project.active != 1) {
+        console.log(`QUAL project: ${project.name}`);
+        await deleteClientListSubfolder(project, token);
+      } else if (project.proj_Division__c === "Quant" && project.active != 1) {
+        console.log(`QUANT project: ${project.name}`);
+        await deleteClientListSubfolder(project, token);
+      } else {
+        console.log(`No QUAL or QUANT projects found`);
+      }
+    }),
+  );
 };
 
 // Validate the projects retrieved from SPP meet filter criteria (Loop B, first decision)
 async function projectFilterValidation(projects) {}
 
 // Delete the Client List subfolder in Sharepoint for each CLOSED project (Loop B, Yes branch, first action)
-async function deleteClientListSubfolder(project) {}
+async function deleteClientListSubfolder(project, token) {
+  const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
+  const hostname = "trivocahealth.sharepoint.com";
+
+  const SITE_PATH_BY_DIVISION = {
+    Qual: "/sites/QualProjects",
+    Quant: "/sites/QuantProjects", // adjust if the actual Quant site path differs
+  };
+
+  const sitePath = SITE_PATH_BY_DIVISION[project.proj_Division__c];
+  if (!sitePath) {
+    console.log(
+      `No site path configured for division: ${project.proj_Division__c}`,
+    );
+    return { deleted: false };
+  }
+
+  async function getSiteId(token) {
+    const res = await fetch(`${GRAPH_BASE}/sites/${hostname}:${sitePath}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await res.json();
+    if (!res.ok)
+      throw new Error(`Failed to resolve site: ${JSON.stringify(data)}`);
+    return data.id;
+  }
+  const siteId = await getSiteId(token);
+  console.log(`siteId: ${siteId}`);
+
+  async function getDriveId(token, siteId) {
+    const res = await fetch(`${GRAPH_BASE}/sites/${siteId}/drive`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await res.json();
+    if (!res.ok)
+      throw new Error(`Failed to resolve drive: ${JSON.stringify(data)}`);
+    return data.id;
+  }
+  const driveId = await getDriveId(token, siteId);
+  console.log(`driveId: ${driveId}`);
+
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+  };
+
+  // Find the project's top-level folder by name
+  const rootListRes = await fetch(
+    `${GRAPH_BASE}/drives/${driveId}/root/children`,
+    {
+      headers,
+    },
+  );
+  const rootListData = await rootListRes.json();
+  if (!rootListRes.ok)
+    throw new Error(
+      `Failed to list root children: ${JSON.stringify(rootListData)}`,
+    );
+
+  const projectFolder = rootListData.value.find(
+    (item) => item.folder && item.name === project.name,
+  );
+
+  if (!projectFolder) {
+    console.log(
+      `Project folder "${project.name}" not found in drive ${driveId} — skipping.`,
+    );
+    return { deleted: false };
+  }
+
+  // Find "Client List" within the project folder
+  const subListRes = await fetch(
+    `${GRAPH_BASE}/drives/${driveId}/items/${projectFolder.id}/children`,
+    { headers },
+  );
+  const subListData = await subListRes.json();
+  if (!subListRes.ok)
+    throw new Error(
+      `Failed to list children of "${project.name}": ${JSON.stringify(subListData)}`,
+    );
+
+  const clientListFolder = subListData.value.find(
+    (item) => item.folder && item.name === "Client List",
+  );
+
+  if (!clientListFolder) {
+    console.log(
+      `"Client List" folder not found under "${project.name}" — nothing to delete.`,
+    );
+    return { deleted: false };
+  }
+
+  // Delete it
+  const deleteRes = await fetch(
+    `${GRAPH_BASE}/drives/${driveId}/items/${clientListFolder.id}`,
+    {
+      method: "DELETE",
+      headers,
+    },
+  );
+
+  if (deleteRes.status !== 204) {
+    const errBody = await deleteRes.text();
+    throw new Error(
+      `Failed to delete "Client List" for "${project.name}": ${deleteRes.status} ${errBody}`,
+    );
+  }
+
+  console.log(
+    `Deleted "Client List" folder for project "${project.name}" (item ID: ${clientListFolder.id})`,
+  );
+  return { deleted: true, itemId: clientListFolder.id };
+}

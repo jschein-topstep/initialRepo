@@ -98,7 +98,7 @@ async function deleteClientListSubfolder(project, token) {
   };
 
   // Find the project's top-level folder by name
-  const rootListRes = await fetch(
+  /*const rootListRes = await fetch(
     `${GRAPH_BASE}/drives/${driveId}/root/children`,
     {
       headers,
@@ -119,7 +119,22 @@ async function deleteClientListSubfolder(project, token) {
       `Project folder "${project.name}" not found in drive ${driveId} — skipping.`,
     );
     return { deleted: false };
+  }*/
+  const encodedName = encodeURIComponent(project.name);
+  const res = await fetch(
+    `${GRAPH_BASE}/drives/${driveId}/root:/${encodedName}`,
+    { headers },
+  );
+  console.log(`direct lookup status: ${res.status}`);
+  if (res.status === 404) {
+    console.log(`Project folder "${project.name}" not found — skipping.`);
+    return { deleted: false };
   }
+  const projectFolder = await res.json();
+  if (!res.ok)
+    throw new Error(
+      `Failed to resolve "${project.name}": ${JSON.stringify(projectFolder)}`,
+    );
 
   // Find "client lists" within the project folder
   const subListRes = await fetch(

@@ -60,7 +60,7 @@ async function deleteClientListSubfolder(project, token) {
   } else if (project.proj_Division__c === "Quant") {
     sitePath = SITE_PATH_BY_DIVISION.Quant;
   }
-
+  console.log(`sitePath: ${sitePath}`);
   if (!sitePath) {
     console.log(
       `No site path configured for division: ${project.proj_Division__c}`,

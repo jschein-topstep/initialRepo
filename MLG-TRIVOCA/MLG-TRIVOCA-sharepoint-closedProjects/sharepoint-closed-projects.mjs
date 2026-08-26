@@ -54,7 +54,13 @@ async function deleteClientListSubfolder(project, token) {
     Quant: "/sites/QuantProjects", // adjust if the actual Quant site path differs
   };
 
-  const sitePath = SITE_PATH_BY_DIVISION[project.proj_Division__c];
+  let sitePath;
+  if (project.proj_Division__c === "Qual") {
+    sitePath = SITE_PATH_BY_DIVISION.Qual;
+  } else if (project.proj_Division__c === "Quant") {
+    sitePath = SITE_PATH_BY_DIVISION.Quant;
+  }
+
   if (!sitePath) {
     console.log(
       `No site path configured for division: ${project.proj_Division__c}`,

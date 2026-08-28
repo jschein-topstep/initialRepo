@@ -72,9 +72,13 @@ async function createFoldersInSharepointQUAL(project, token) {
   const driveId = await getDriveId(token, siteId);
   console.log(`driveId: ${driveId}`);
 
-  // Create a folder at drive root
-  async function createFolderAtRoot(token, driveId, folderName) {
-    const res = await fetch(`${GRAPH_BASE}/drives/${driveId}/root/children`, {
+  // Generic folder creation, works at root OR under a parent item
+  async function createFolder(token, driveId, folderName, parentId = null) {
+    const endpoint = parentId
+      ? `${GRAPH_BASE}/drives/${driveId}/items/${parentId}/children`
+      : `${GRAPH_BASE}/drives/${driveId}/root/children`;
+
+    const res = await fetch(endpoint, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
@@ -89,170 +93,73 @@ async function createFoldersInSharepointQUAL(project, token) {
     const data = await res.json();
     if (!res.ok) {
       throw new Error(
-        `Folder creation failed for "${folderName}" at root: ${JSON.stringify(data)}`,
+        `Folder creation failed for "${folderName}"${
+          parentId ? ` under parent ${parentId}` : " at root"
+        }: ${JSON.stringify(data)}`,
       );
     }
     console.log(`Folder created: ${folderName} -> id: ${data.id}`);
-    await addMetadataToSharepointFolder(
-      token,
-      project,
-      data.id,
-      siteId,
-      driveId,
-    );
     return data;
   }
 
-  // Create a folder underneath a known parent item ID
-  async function createFolderInParent(token, driveId, parentId, folderName) {
-    const res = await fetch(
-      `${GRAPH_BASE}/drives/${driveId}/items/${parentId}/children`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
+  // Recursively walks a folder tree definition and creates each node.
+  // `node` can be a plain string (leaf, no children) or an object:
+  //   { name: "Accounting+Compliance", children: [ "Compliance Materials", { name: "..." , children: [...] } ] }
+  async function createFolderTree(token, driveId, node, parentId) {
+    const name = typeof node === "string" ? node : node.name;
+    const children = typeof node === "string" ? [] : node.children || [];
+
+    const created = await createFolder(token, driveId, name, parentId);
+
+    if (children.length) {
+      await Promise.all(
+        children.map((child) =>
+          createFolderTree(token, driveId, child, created.id),
+        ),
+      );
+    }
+
+    return created;
+  }
+
+  // Define the full structure once, declaratively
+  const folderStructure = [
+    {
+      name: "Accounting+Compliance",
+      children: ["Compliance Materials", "Invoicing"],
+    },
+    "Client Lists",
+    {
+      name: "Project Management",
+      children: [
+        {
+          name: "Project Materials",
+          children: ["NDAs", "Prework", "Schedule", "Screener+Algorithm"],
         },
-        body: JSON.stringify({
-          name: folderName,
-          folder: {},
-          "@microsoft.graph.conflictBehavior": "replace",
-        }),
-      },
-    );
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(
-        `Folder creation failed for "${folderName}" under parent ${parentId}: ${JSON.stringify(data)}`,
-      );
-    }
-    console.log(`Folder created: ${folderName} -> id: ${data.id}`);
-    return data;
-  }
+        "Recruiting Updates",
+      ],
+    },
+  ];
 
-  async function createSubFolders(
+  const projectFolder = await createFolder(token, driveId, project.name);
+
+  // Metadata on the project folder itself
+  await addMetadataToSharepointFolder(
     token,
+    project,
+    projectFolder.id,
+    siteId,
     driveId,
-    parentId,
-    childFolderNames = [],
-  ) {
-    return Promise.all(
-      childFolderNames.map((childName) =>
-        createFolderInParent(token, driveId, parentId, childName),
-      ),
-    );
-  }
+  );
 
-  const projectFolder = await createFolderAtRoot(token, driveId, project.name);
+  console.log(`Creating folder structure for: ${project.name}`);
+  await Promise.all(
+    folderStructure.map((node) =>
+      createFolderTree(token, driveId, node, projectFolder.id),
+    ),
+  );
 
-  console.log(`Creating subfolders for: ${project.name}`);
-  await createSubFolders(token, driveId, projectFolder.id, [
-    "Accounting+Compliance",
-    "Project Management",
-  ]);
-}
-
-// Create folders and subfolders in Sharepoint for each NEW project (Loop A, Yes branch, first action)
-async function createFoldersInSharepointQUANT(project, token) {
-  const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
-
-  async function getSiteId(token) {
-    const hostname = "trivocahealth.sharepoint.com";
-    const sitePath = "/sites/QuantProjects";
-    const res = await fetch(`${GRAPH_BASE}/sites/${hostname}:${sitePath}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const data = await res.json();
-    if (!res.ok)
-      throw new Error(`Failed to resolve site: ${JSON.stringify(data)}`);
-    return data.id;
-  }
-  const siteId = await getSiteId(token);
-  console.log(`siteId: ${siteId}`);
-
-  async function getDriveId(token, siteId) {
-    const res = await fetch(`${GRAPH_BASE}/sites/${siteId}/drive`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const data = await res.json();
-    if (!res.ok)
-      throw new Error(`Failed to resolve drive: ${JSON.stringify(data)}`);
-    return data.id;
-  }
-  const driveId = await getDriveId(token, siteId);
-  console.log(`driveId: ${driveId}`);
-
-  // Create a folder at drive root
-  async function createFolderAtRoot(token, driveId, folderName) {
-    const res = await fetch(`${GRAPH_BASE}/drives/${driveId}/root/children`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        name: folderName,
-        folder: {},
-        "@microsoft.graph.conflictBehavior": "replace",
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(
-        `Folder creation failed for "${folderName}" at root: ${JSON.stringify(data)}`,
-      );
-    }
-    console.log(`Folder created: ${folderName} -> id: ${data.id}`);
-    return data;
-  }
-
-  // Create a folder underneath a known parent item ID
-  async function createFolderInParent(token, driveId, parentId, folderName) {
-    const res = await fetch(
-      `${GRAPH_BASE}/drives/${driveId}/items/${parentId}/children`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          name: folderName,
-          folder: {},
-          "@microsoft.graph.conflictBehavior": "replace",
-        }),
-      },
-    );
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(
-        `Folder creation failed for "${folderName}" under parent ${parentId}: ${JSON.stringify(data)}`,
-      );
-    }
-    console.log(`Folder created: ${folderName} -> id: ${data.id}`);
-    return data;
-  }
-
-  async function createSubFolders(
-    token,
-    driveId,
-    parentId,
-    childFolderNames = [],
-  ) {
-    return Promise.all(
-      childFolderNames.map((childName) =>
-        createFolderInParent(token, driveId, parentId, childName),
-      ),
-    );
-  }
-
-  const projectFolder = await createFolderAtRoot(token, driveId, project.name);
-
-  console.log(`Creating subfolders for: ${project.name}`);
-  await createSubFolders(token, driveId, projectFolder.id, [
-    "Accounting+Compliance",
-    "Project Management",
-  ]);
+  return projectFolder;
 }
 
 // Add metadata to the Sharepoint folder for each NEW project (Loop A, Yes branch, second action)

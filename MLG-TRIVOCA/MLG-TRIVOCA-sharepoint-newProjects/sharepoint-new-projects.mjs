@@ -29,26 +29,34 @@ export const handler = async (event) => {
       const ownerId = await getUserId(token, project.owner_email); // email of the proj owner
       const teamId = await newSharepointTeam(token, project.name, ownerId);
 
-      if (project.proj_Division__c === "Qual") {
-        console.log(`QUAL project: ${project.name}`);
-        await createFoldersInSharepointQUAL(project, token);
-      } else if (project.proj_Division__c === "Quant") {
-        console.log(`QUANT project: ${project.name}`);
-        await createFoldersInSharepointQUANT(project, token);
-      } else {
-        console.log(`No QUAL or QUANT projects found`);
-      }
+      await createFoldersInSharepoint(project, token);
     }),
   );
 };
 
 // Create folders and subfolders in Sharepoint for each NEW project (Loop A, Yes branch, first action)
-async function createFoldersInSharepointQUAL(project, token) {
+async function createFoldersInSharepoint(project, token) {
   const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
+  const hostname = "trivocahealth.sharepoint.com";
+  const SITE_PATH_BY_DIVISION = {
+    Qual: "/sites/QualProjects",
+    Quant: "/sites/QuantProjects", // adjust if the actual Quant site path differs
+  };
 
+  let sitePath;
+  if (project.proj_Division__c == "Qual") {
+    sitePath = SITE_PATH_BY_DIVISION.Qual;
+  } else if (project.proj_Division__c == "Quant") {
+    sitePath = SITE_PATH_BY_DIVISION.Quant;
+  }
+  console.log(`sitePath: ${sitePath}`);
+  if (!sitePath) {
+    console.log(
+      `No site path configured for division: ${project.proj_Division__c}`,
+    );
+    return { deleted: false };
+  }
   async function getSiteId(token) {
-    const hostname = "trivocahealth.sharepoint.com";
-    const sitePath = "/sites/QualProjects";
     const res = await fetch(`${GRAPH_BASE}/sites/${hostname}:${sitePath}`, {
       headers: { Authorization: `Bearer ${token}` },
     });

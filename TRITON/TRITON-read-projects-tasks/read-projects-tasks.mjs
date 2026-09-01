@@ -56,7 +56,7 @@ async function getProjectsByStage(stageIds, accessToken) {
   const allProjects = [];
   const stageFilter = buildStageFilter(stageIds);
   console.log(`Stage filter: ${stageFilter}`);
-  let url = `${BASE_URL}/projects/?q=${encodeURIComponent(stageFilter)}&limit=1000&offset=0`;
+  let url = `${BASE_URL}/projects/?q=${encodeURIComponent(stageFilter)}&fields=id,name&limit=1000&offset=0`;
     console.log(`Initial URL: ${url}`);
   while (url) {
     const response = await fetch(url, {
@@ -81,36 +81,6 @@ async function getProjectsByStage(stageIds, accessToken) {
 
   return allProjects;
 }
-async function testGetProjectsByStage(stageIds, accessToken, count = 5) {
-  const stageFilter = buildStageFilter(stageIds);
-
-  const params = new URLSearchParams({
-    q: stageFilter,
-    fields: 'id,name',
-    limit: String(count),
-    offset: '0',
-  });
-
-  const url = `${BASE_URL}/projects/?${params.toString()}`;
-  console.log(`Test URL: ${url}`);
-
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      Accept: 'application/json',
-    },
-  });
-
-  if (!response.ok) {
-    const errBody = await response.text();
-    throw new Error(`SuiteProjects Pro request failed (${response.status}): ${errBody}`);
-  }
-
-  const body = await response.json();
-  console.log(`Got ${body.data?.length ?? 0} projects, meta.totalRows: ${body.meta?.totalRows}`);
-  return body;
-}
 
 export const handler = async (event) => {
   try {
@@ -120,8 +90,8 @@ export const handler = async (event) => {
     const accessToken = await getAccessToken();
     console.log(`accessToken:'${accessToken}'`);
 
-    const projects = await testGetProjectsByStage(stageIds, accessToken, event?.count || 5);
-    //const projects = await getProjectsByStage(stageIds, accessToken);
+    //const projects = await testGetProjectsByStage(stageIds, accessToken, event?.count || 5);
+    const projects = await getProjectsByStage(stageIds, accessToken);
     console.log(`projects:'${JSON.stringify(projects)}'`);
 
     return {

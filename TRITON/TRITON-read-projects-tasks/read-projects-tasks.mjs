@@ -84,7 +84,7 @@ async function getProjectsByStage(stageIds, accessToken) {
 
 exports.handler = async (event) => {
   try {
-    const stageIds = event?.stageIds || [12]; // replace with real internal ID(s)
+    const stageIds = event?.stageIds || [3]; // replace with real internal ID(s)
 
     const accessToken = await getAccessToken();
     const projects = await getProjectsByStage(stageIds, accessToken);

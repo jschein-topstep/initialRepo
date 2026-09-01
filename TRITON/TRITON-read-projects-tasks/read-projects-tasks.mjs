@@ -98,14 +98,14 @@ async function fetchAllPages(initialUrl, accessToken) {
 
 async function getProjects(stageIds, accessToken) {
   const stageFilter = buildIdFilter('projectStageId', stageIds);
-  const url = `${BASE_URL}/projects/?q=${encodeURIComponent(stageFilter)}&fields=id,name&limit=1000&offset=0`;
+  const url = `${BASE_URL}/projects/?q=${encodeURIComponent(stageFilter)}&fields=id,name&filterSetId=1&limit=1000&offset=0`;
   const projects = await fetchAllPages(url, accessToken);
   return projects.map((p) => ({ id: String(p.id), name: p.name }));
 }
 
 async function getProjectTasks(projectId, accessToken) {
   const taskFilter = buildIdFilter('projectId', projectId);
-  const url = `${BASE_URL}/project-tasks/?q=${encodeURIComponent(taskFilter)}&fields=id,name,projectId&limit=1000&offset=0`;
+  const url = `${BASE_URL}/project-tasks/?q=${encodeURIComponent(taskFilter)}&fields=id,name,projectId&filterSetId=1&limit=1000&offset=0`;
   const tasks = await fetchAllPages(url, accessToken);
   return tasks.map((t) => ({ id: String(t.id), name: t.name }));
 }
@@ -196,6 +196,29 @@ export const handler = async (event) => {
         return jsonResponse(response.status, { message: `SPP error: ${rawBody}` });
       }
       return jsonResponse(200, JSON.parse(rawBody));
+    }
+
+    // TEMP DEBUG: pull ALL project-tasks (org-wide, currently ~1188 rows, so
+    // safe to fully paginate) and check client-side whether any belong to
+    // the given projectId. This isolates whether SPP's own `q` filter is
+    // failing to match, versus the project genuinely having zero tasks
+    // visible to this API user.
+    if (type === 'debug-scan') {
+      if (!qs.projectId) {
+        return jsonResponse(400, { message: 'projectId query param is required for type=debug-scan' });
+      }
+      const targetId = Number(qs.projectId);
+      const url = `${BASE_URL}/project-tasks/?fields=id,name,projectId&limit=1000&offset=0`;
+      const allTasks = await fetchAllPages(url, accessToken);
+      const matches = allTasks.filter((t) => t.projectId === targetId);
+      const distinctProjectIds = [...new Set(allTasks.map((t) => t.projectId))];
+      return jsonResponse(200, {
+        totalTasksScanned: allTasks.length,
+        targetId,
+        matchCount: matches.length,
+        matches,
+        distinctProjectIdsSeen: distinctProjectIds.sort((a, b) => a - b),
+      });
     }
 
     return jsonResponse(400, { message: `Unknown type: ${type}` });

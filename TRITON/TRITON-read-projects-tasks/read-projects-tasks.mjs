@@ -57,7 +57,7 @@ async function getProjectsByStage(stageIds, accessToken) {
   const stageFilter = buildStageFilter(stageIds);
 
   let url = `${BASE_URL}/projects/?q=${encodeURIComponent(stageFilter)}&limit=100&offset=0`;
-
+    console.log(`Initial URL: ${url}`);
   while (url) {
     const response = await fetch(url, {
       method: 'GET',
@@ -85,9 +85,12 @@ async function getProjectsByStage(stageIds, accessToken) {
 export const handler = async (event) => {
   try {
     const stageIds = event?.stageIds || [3]; // replace with real internal ID(s)
+     console.log(`stageIds:'${JSON.stringify(stageIds)}'`);
 
     const accessToken = await getAccessToken();
+    console.log(`accessToken:'${accessToken}'`);
     const projects = await getProjectsByStage(stageIds, accessToken);
+    console.log(`projects:'${JSON.stringify(projects)}'`);
 
     return {
       statusCode: 200,

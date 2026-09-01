@@ -92,8 +92,8 @@ export const handler = async (event) => {
 
     //const projects = await testGetProjectsByStage(stageIds, accessToken, event?.count || 5);
     const projects = await getProjectsByStage(stageIds, accessToken);
-    console.log(`projects:'${JSON.stringify(projects)}'`);
-
+    //console.log(`projects:'${JSON.stringify(projects)}'`);
+    console.log(projects.length);
     return {
       statusCode: 200,
       body: JSON.stringify({ count: projects.length, projects }),

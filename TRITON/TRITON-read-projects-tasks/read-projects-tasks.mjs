@@ -145,14 +145,16 @@ export const handler = async (event) => {
       return jsonResponse(200, tasks);
     }
 
-    // TEMP DEBUG: unfiltered peek at raw project-tasks rows, to confirm the
-    // real field name / value shape for the project foreign key. Remove once
-    // the filter in getProjectTasks() is confirmed correct.
-    // NOTE: single fetch only (no fetchAllPages) -- limit=5 caps the *page
-    // size*, not the total, so following meta.links.next would page through
-    // the entire org's project-tasks and time out.
+       // TEMP DEBUG: peek at raw project-tasks response (including meta), either
+    // unfiltered or filtered by projectId if provided. Remove once the
+    // filter in getProjectTasks() is confirmed correct.
+    // NOTE: single fetch only (no fetchAllPages) -- limit caps the *page
+    // size*, not the total, so following meta.links.next on an unfiltered
+    // call would page through the entire org's project-tasks and time out.
     if (type === 'debug-tasks') {
-      const url = `${BASE_URL}/project-tasks/?fields=id,name,projectId&limit=5&offset=0`;
+      const filterClause = qs.projectId ? buildIdFilter('projectId', qs.projectId) : null;
+      const qParam = filterClause ? `q=${encodeURIComponent(filterClause)}&` : '';
+      const url = `${BASE_URL}/project-tasks/?${qParam}fields=id,name,projectId&limit=5&offset=0`;
       console.log('Debug URL:', url);
       const response = await fetch(url, {
         method: 'GET',
@@ -161,12 +163,14 @@ export const handler = async (event) => {
           Accept: 'application/json',
         },
       });
+      const rawBody = await response.text();
+      console.log('Debug raw response:', rawBody);
       if (!response.ok) {
-        const errBody = await response.text();
-        return jsonResponse(response.status, { message: `SPP error: ${errBody}` });
+        return jsonResponse(response.status, { message: `SPP error: ${rawBody}` });
       }
-      const body = await response.json();
-      return jsonResponse(200, body.data || []);
+      // Return the FULL parsed body (data + meta), not just data, so we can
+      // see totalRows / message alongside the rows.
+      return jsonResponse(200, JSON.parse(rawBody));
     }
 
     return jsonResponse(400, { message: `Unknown type: ${type}` });

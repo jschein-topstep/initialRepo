@@ -144,6 +144,13 @@ export const handler = async (event) => {
       return jsonResponse(200, tasks);
     }
 
+    if (type === 'debug-tasks') {
+      const url = `${BASE_URL}/project-tasks/?fields=id,name,projectId&limit=5&offset=0`;
+      console.log('Debug URL:', url);
+      const raw = await fetchAllPages(url, accessToken);
+      return jsonResponse(200, raw);
+    }
+
     return jsonResponse(400, { message: `Unknown type: ${type}` });
   } catch (err) {
     console.error(err);

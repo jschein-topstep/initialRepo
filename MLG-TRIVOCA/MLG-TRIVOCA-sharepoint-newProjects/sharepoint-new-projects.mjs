@@ -180,12 +180,13 @@ async function addMetadataToSharepointFolder(
   driveId,
 ) {
   console.log(`Entering metadata function`);
+  //"LinkFilename", //name?
+  // "Account Rep", // not found
   const RELEVANT_COLUMNS = [
     "Year",
     "ProjectManager",
-    "FileLeafRef",
-    "Clients",
     "ProjectCoordinator",
+    "Clients",
     "Account_x0020_Manager",
   ];
 
@@ -267,6 +268,11 @@ async function addMetadataToSharepointFolder(
     siteId,
     project.owner_email,
   );
+  const spCoordinatorId = await getSharepointUserId(
+    token,
+    siteId,
+    project.coordinator_email,
+  );
 
   async function updateFolderMetadata(token, driveId, itemId, columns) {
     const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
@@ -298,6 +304,8 @@ async function addMetadataToSharepointFolder(
   await updateFolderMetadata(token, driveId, folderId, {
     Year: String(new Date().getFullYear()),
     ProjectManagerLookupId: spOwnerId,
+    ProjectCoordinatorLookupId: spCoordinatorId,
+    Clients: "Dexcom",
     /*FileLeafRef
 Account_x0020_Manager (confirm)
 Clients

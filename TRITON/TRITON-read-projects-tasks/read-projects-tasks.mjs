@@ -56,7 +56,7 @@ async function getProjectsByStage(stageIds, accessToken) {
   const allProjects = [];
   const stageFilter = buildStageFilter(stageIds);
   console.log(`Stage filter: ${stageFilter}`);
-  let url = `${BASE_URL}/projects/?q=${encodeURIComponent(stageFilter)}&limit=1&offset=0`;
+  let url = `${BASE_URL}/projects/?q=${encodeURIComponent(stageFilter)}&limit=1000&offset=0`;
     console.log(`Initial URL: ${url}`);
   while (url) {
     const response = await fetch(url, {

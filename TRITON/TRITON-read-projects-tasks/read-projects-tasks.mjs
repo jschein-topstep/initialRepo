@@ -3,6 +3,7 @@
 //
 // GET ?type=projects              -> [{ id, name }, ...]  (projects in the configured stage(s))
 // GET ?type=tasks&projectId=1234  -> [{ id, name }, ...]  (tasks for ONE project, called on-demand)
+// GET ?type=debug-tasks           -> raw, unfiltered peek at 5 project-tasks rows (temp debug)
 //
 // Env vars:
 //   SPP_BASE_URL          e.g. https://triton-env-sb.app.sandbox.netsuitesuiteprojectspro.com/rest/v1
@@ -144,11 +145,28 @@ export const handler = async (event) => {
       return jsonResponse(200, tasks);
     }
 
+    // TEMP DEBUG: unfiltered peek at raw project-tasks rows, to confirm the
+    // real field name / value shape for the project foreign key. Remove once
+    // the filter in getProjectTasks() is confirmed correct.
+    // NOTE: single fetch only (no fetchAllPages) -- limit=5 caps the *page
+    // size*, not the total, so following meta.links.next would page through
+    // the entire org's project-tasks and time out.
     if (type === 'debug-tasks') {
       const url = `${BASE_URL}/project-tasks/?fields=id,name,projectId&limit=5&offset=0`;
       console.log('Debug URL:', url);
-      const raw = await fetchAllPages(url, accessToken);
-      return jsonResponse(200, raw);
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: 'application/json',
+        },
+      });
+      if (!response.ok) {
+        const errBody = await response.text();
+        return jsonResponse(response.status, { message: `SPP error: ${errBody}` });
+      }
+      const body = await response.json();
+      return jsonResponse(200, body.data || []);
     }
 
     return jsonResponse(400, { message: `Unknown type: ${type}` });

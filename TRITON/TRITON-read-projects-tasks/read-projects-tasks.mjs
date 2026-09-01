@@ -136,6 +136,7 @@ export const handler = async (event) => {
     }
 
     if (type === 'tasks') {
+      console.log('Fetching tasks for project:', qs.projectId);
       if (!qs.projectId) {
         return jsonResponse(400, { message: 'projectId query param is required for type=tasks' });
       }

@@ -1,8 +1,14 @@
 // SuiteProjects Pro reads for the Time Entry Reallocation tool.
 // Deployed at: https://qswxt37g563vjqakg36ft7enqa0gelml.lambda-url.us-east-2.on.aws/
 //
-// GET ?type=projects              -> [{ id, name }, ...]  (projects in the configured stage(s))
+// GET ?type=projects              -> [{ id, name }, ...]  (active projects in the configured stage(s))
 // GET ?type=tasks&projectId=1234  -> [{ id, name }, ...]  (tasks for ONE project, called on-demand)
+//
+// IMPORTANT: SPP's /project-tasks/ endpoint only returns tasks for projects
+// that are marked active -- inactive projects silently return zero tasks,
+// regardless of any other filter (confirmed via testing, reason unknown).
+// So the project list itself is filtered to active projects, to avoid
+// showing users a project that would then yield an empty task dropdown.
 //
 // Env vars:
 //   SPP_BASE_URL          e.g. https://triton-env-sb.app.sandbox.netsuitesuiteprojectspro.com/rest/v1
@@ -98,15 +104,19 @@ async function fetchAllPages(initialUrl, accessToken) {
 
 async function getProjects(stageIds, accessToken) {
   const stageFilter = buildIdFilter('projectStageId', stageIds);
-  const url = `${BASE_URL}/projects/?q=${encodeURIComponent(stageFilter)}&fields=id,name&filterSetId=1&limit=1000&offset=0`;
+  // Combine with an active-status clause -- tasks for inactive projects are
+  // invisible via the API, so no point listing those projects at all.
+  const filter = `${stageFilter} AND isActive IS true`;
+  const url = `${BASE_URL}/projects/?q=${encodeURIComponent(filter)}&fields=id,name&limit=1000&offset=0`;
+  console.log('Projects URL:', url);
   const projects = await fetchAllPages(url, accessToken);
   return projects.map((p) => ({ id: String(p.id), name: p.name }));
 }
 
 async function getProjectTasks(projectId, accessToken) {
   const taskFilter = buildIdFilter('projectId', projectId);
-  const url = `${BASE_URL}/project-tasks/?q=${encodeURIComponent(taskFilter)}&fields=id,name,projectId&filterSetId=1&limit=1000&offset=0`;
-  console.log('Task Url:', url);
+  const url = `${BASE_URL}/project-tasks/?q=${encodeURIComponent(taskFilter)}&fields=id,name,projectId&limit=1000&offset=0`;
+  console.log('Task URL:', url);
   const tasks = await fetchAllPages(url, accessToken);
   return tasks.map((t) => ({ id: String(t.id), name: t.name }));
 }
@@ -144,8 +154,6 @@ export const handler = async (event) => {
       const tasks = await getProjectTasks(qs.projectId, accessToken);
       return jsonResponse(200, tasks);
     }
-
-    
 
     return jsonResponse(400, { message: `Unknown type: ${type}` });
   } catch (err) {

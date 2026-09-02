@@ -106,6 +106,7 @@ async function getProjects(stageIds, accessToken) {
 async function getProjectTasks(projectId, accessToken) {
   const taskFilter = buildIdFilter('projectId', projectId);
   const url = `${BASE_URL}/project-tasks/?q=${encodeURIComponent(taskFilter)}&fields=id,name,projectId&filterSetId=1&limit=1000&offset=0`;
+  console.log('Task Url:', url);
   const tasks = await fetchAllPages(url, accessToken);
   return tasks.map((t) => ({ id: String(t.id), name: t.name }));
 }

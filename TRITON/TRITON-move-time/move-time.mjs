@@ -156,7 +156,7 @@ async function processMovement(movement, authObj, callSharedUtil) {
     const targetProject = await fetchOne(callSharedUtil, authObj, "Project", { id: projTargetNum });
     if (!targetProject) throw new Error(`target project ${projTargetNum} not found`);
 
-    /*
+    
     const updatedOriginal = await callSharedUtil("tslib-putRecords", {
       authObj,
       recordType: "Task",
@@ -165,9 +165,9 @@ async function processMovement(movement, authObj, callSharedUtil) {
         decimal_hours: timeDiff,
       },
     });
-    */
 
-    /*
+
+    
     const createdEntry = await callSharedUtil("tslib-putRecords", {
       authObj,
       recordType: "Task",
@@ -183,7 +183,7 @@ async function processMovement(movement, authObj, callSharedUtil) {
         timetypeid: originalEntry.timetypeid,
       },
     });
-    */
+    
 
     return {
       type: "partial",
@@ -194,7 +194,7 @@ async function processMovement(movement, authObj, callSharedUtil) {
 
   // --- Full move: the whole entry just moves onto the new project/task in place --
   //     mirrors move_time.js's fullMove branch (no new record, no customerid change).
-  /*
+  
   const updated = await callSharedUtil("tslib-putRecords", {
     authObj,
     recordType: "Task",
@@ -204,7 +204,7 @@ async function processMovement(movement, authObj, callSharedUtil) {
       projecttaskid: taskTargetNum,
     },
   });
-  */
+  
 
   return { type: "full", updatedId: updated?.id ?? teId };
 }

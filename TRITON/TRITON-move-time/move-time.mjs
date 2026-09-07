@@ -117,9 +117,11 @@ export const handler = async (event) => {
     }
   }
 
+  console.log(`DRY_RUN=${DRY_RUN}; about to write audit log (if configured)`);
   const logFile = DRY_RUN
     ? { status: "skipped", reason: "DRY_RUN" }
     : await writeLogToWorkspace(callSharedUtil, authObj, movements, results);
+  console.log(`logFile result: ${JSON.stringify(logFile)}`);
 
   return jsonResponse(200, { results, logFile });
 };
@@ -289,6 +291,11 @@ function normalizeDateForSpp(dateStr) {
  * skipped rather than guessing a workspace and writing to the wrong place.
  * This is best-effort: a failure here is reported in the response's
  * `logFile` field but never overwrites/blocks the actual `results`.
+ *
+ * Every stage logs explicitly (resolved workspace id, CSV built, about to
+ * call tslib-putRecords, result) specifically so a partial/no-op run is
+ * diagnosable -- e.g. a Lambda timeout cutting execution off partway
+ * through will now show exactly how far it got before disappearing.
  ******************************************************/
 function csvEscape(value) {
   const str = String(value ?? "");
@@ -315,16 +322,19 @@ function buildResultsCsv(movements, results) {
 }
 
 async function writeLogToWorkspace(callSharedUtil, authObj, movements, results) {
-  const workspaceId = Number(6 || 0);
+  const workspaceId = Number(process.env.SPP_LOG_WORKSPACE_ID || 0);
+  console.log(`writeLogToWorkspace: resolved workspaceId=${workspaceId}`);
   if (!workspaceId) {
+    console.log("writeLogToWorkspace: skipped -- SPP_LOG_WORKSPACE_ID env var is not set");
     return { status: "skipped", reason: "SPP_LOG_WORKSPACE_ID env var is not set" };
   }
 
-  const csv = buildResultsCsv(movements, results);
-  const base64Data = Buffer.from(csv, "utf-8").toString("base64");
-  const filename = `move-time-log-${new Date().toISOString().replace(/[:.]/g, "-")}.csv`;
-
   try {
+    const csv = buildResultsCsv(movements, results);
+    const base64Data = Buffer.from(csv, "utf-8").toString("base64");
+    const filename = `move-time-log-${new Date().toISOString().replace(/[:.]/g, "-")}.csv`;
+    console.log(`writeLogToWorkspace: built CSV (${csv.length} chars, ${movements.length} row(s)); calling tslib-putRecords for "${filename}" in workspace ${workspaceId}`);
+
     const created = await callSharedUtil("tslib-putRecords", {
       authObj,
       recordType: "Attachment",
@@ -334,10 +344,10 @@ async function writeLogToWorkspace(callSharedUtil, authObj, movements, results) 
         base64_data: base64Data,
       },
     });
-    console.log(`Log file written: ${filename} (id ${created?.id ?? "unknown"})`);
+    console.log(`writeLogToWorkspace: log file written: ${filename} (id ${created?.id ?? "unknown"})`);
     return { status: "ok", id: created?.id ?? null, name: filename };
   } catch (err) {
-    console.error(`Failed to write log file to workspace ${workspaceId}: ${err.message}`);
-    return { status: "error", message: err.message };
+    console.error(`writeLogToWorkspace: failed to write log file to workspace ${workspaceId}: ${err.stack || err.message || err}`);
+    return { status: "error", message: err.message || String(err) };
   }
 }

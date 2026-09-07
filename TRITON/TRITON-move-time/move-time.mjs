@@ -340,6 +340,7 @@ async function writeLogToWorkspace(callSharedUtil, authObj, movements, results) 
       recordType: "Attachment",
       writeObj: {
         name: filename,
+        file_name: filename,
         workspaceid: workspaceId,
         base64_data: base64Data,
       },

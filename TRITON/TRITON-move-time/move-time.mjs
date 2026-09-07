@@ -322,7 +322,7 @@ function buildResultsCsv(movements, results) {
 }
 
 async function writeLogToWorkspace(callSharedUtil, authObj, movements, results) {
-  const workspaceId = Number(process.env.SPP_LOG_WORKSPACE_ID || 0);
+  const workspaceId = Number(6 || 0);
   console.log(`writeLogToWorkspace: resolved workspaceId=${workspaceId}`);
   if (!workspaceId) {
     console.log("writeLogToWorkspace: skipped -- SPP_LOG_WORKSPACE_ID env var is not set");

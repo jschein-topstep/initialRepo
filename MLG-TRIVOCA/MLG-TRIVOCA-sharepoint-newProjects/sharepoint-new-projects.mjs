@@ -26,8 +26,11 @@ export const handler = async (event) => {
 
   await Promise.all(
     bodyJSON.projects.map(async (project) => {
-      const ownerId = await getUserId(token, project.owner_email); // email of the proj owner
-      const teamId = await newSharepointTeam(token, project.name, ownerId);
+      // NOTE: this still resolves an AAD user id from project.owner_email for the
+      // Team owner role — Graph requires a real user object binding here, so this
+      // stays email-based even though the SharePoint metadata below is now free text.
+      //const ownerId = await getUserId(token, project.owner_email); // email of the proj owner
+      //const teamId = await newSharepointTeam(token, project.name, ownerId);
 
       await createFoldersInSharepoint(project, token);
     }),
@@ -182,98 +185,22 @@ async function addMetadataToSharepointFolder(
   console.log(`Entering metadata function`);
   //"LinkFilename", //name?
   // "Account Rep", // not found
-  const RELEVANT_COLUMNS = [
-    "Year",
-    "ProjectManager",
-    "ProjectCoordinator",
-    "Clients",
-    "Account_x0020_Manager",
-  ];
 
-  async function getLibraryColumns(
-    token,
-    siteId,
-    filterNames = RELEVANT_COLUMNS,
-  ) {
-    const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
+  // SPP dates come through as "yyyy/MM/dd" strings; SharePoint date columns
+  // via Graph expect ISO 8601. Returns null (rather than throwing) for
+  // missing/malformed input so a bad date doesn't blow up the whole PATCH.
+  function formatSppDateToIso(sppDate) {
+    if (!sppDate) return null;
 
-    const listRes = await fetch(
-      `${GRAPH_BASE}/sites/${siteId}/lists/Documents`,
-      {
-        headers: { Authorization: `Bearer ${token}` },
-      },
-    );
-    const listData = await listRes.json();
-    if (!listRes.ok) {
-      throw new Error(
-        `Failed to resolve Documents list: ${JSON.stringify(listData)}`,
-      );
-    }
-    const listId = listData.id;
-
-    const colRes = await fetch(
-      `${GRAPH_BASE}/sites/${siteId}/lists/${listId}/columns?$select=name,displayName,columnGroup,hidden,readOnly`,
-      { headers: { Authorization: `Bearer ${token}` } },
-    );
-    const colData = await colRes.json();
-    console.log(`Columns retrieved: ${JSON.stringify(colData)}`);
-    if (!colRes.ok) {
-      throw new Error(`Failed to get columns: ${JSON.stringify(colData)}`);
+    const match = /^(\d{4})\/(\d{2})\/(\d{2})$/.exec(sppDate.trim());
+    if (!match) {
+      console.log(`Unrecognized SPP date format: "${sppDate}"`);
+      return null;
     }
 
-    const relevant = colData.value.filter((col) =>
-      filterNames.includes(col.name),
-    );
-
-    relevant.forEach((col) => {
-      console.log(`internal: ${col.name}  |  display: ${col.displayName}`);
-    });
-
-    return relevant;
+    const [, year, month, day] = match;
+    return `${year}-${month}-${day}T00:00:00Z`;
   }
-  let columns = await getLibraryColumns(token, siteId);
-
-  async function getSharepointUserId(token, siteId, upnOrEmail) {
-    const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
-
-    // Looks up the user's row in this site's hidden "User Information List" —
-    // that row's numeric id is what personOrGroup fields (like ProjectManagerLookupId) need.
-    const res = await fetch(
-      `${GRAPH_BASE}/sites/${siteId}/lists/User%20Information%20List/items?$expand=fields($select=EMail)&$filter=fields/EMail eq '${upnOrEmail}'`,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Prefer: "HonorNonIndexedQueriesWarningMayFailRandomly",
-        },
-      },
-    );
-
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(
-        `Failed to resolve SharePoint user "${upnOrEmail}": ${JSON.stringify(data)}`,
-      );
-    }
-    if (!data.value || data.value.length === 0) {
-      throw new Error(
-        `User "${upnOrEmail}" not found in site User Information List — they may not have visited the site yet.`,
-      );
-    }
-
-    const spUserId = data.value[0].id;
-    console.log(`Resolved SharePoint user id for ${upnOrEmail}: ${spUserId}`);
-    return spUserId;
-  }
-  const spOwnerId = await getSharepointUserId(
-    token,
-    siteId,
-    project.owner_email,
-  );
-  const spCoordinatorId = await getSharepointUserId(
-    token,
-    siteId,
-    project.coordinator_email,
-  );
 
   async function updateFolderMetadata(token, driveId, itemId, columns) {
     const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
@@ -303,14 +230,15 @@ async function addMetadataToSharepointFolder(
     return data;
   }
   await updateFolderMetadata(token, driveId, folderId, {
-    Year: String(new Date().getFullYear()),
-    ProjectManagerLookupId: spOwnerId,
-    ProjectCoordinatorLookupId: spCoordinatorId,
-    Clients: "Dexcom",
+    ProjectManager: project.owner_name,
+    ProjectCoordinator: project.coordinator_name,
+    ProjectDate: project.start_date.substring(0, 10),
+    ProjectEndDate: project.trv_proj_End_Date__c.substring(0, 10),
+    AccountManager: project.proj_Sales_Rep__c,
+    ProjectStatus: project.proj_Project_Status__c,
+    Client: project.client_name,
     /*FileLeafRef
-Account_x0020_Manager (confirm)
-Clients
-ProjectCoordinator*/
+Clients*/
   });
 }
 

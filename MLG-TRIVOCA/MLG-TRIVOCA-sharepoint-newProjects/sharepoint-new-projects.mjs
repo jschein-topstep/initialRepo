@@ -39,7 +39,7 @@ async function createFoldersInSharepoint(project, token) {
   const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
   const hostname = "trivocahealth.sharepoint.com";
   const SITE_PATH_BY_DIVISION = {
-    Qual: "/sites/QualProjects",
+    Qual: "/sites/QualitativeProjects",
     Quant: "/sites/QuantProjects", // adjust if the actual Quant site path differs
   };
 
@@ -216,6 +216,7 @@ async function addMetadataToSharepointFolder(
       { headers: { Authorization: `Bearer ${token}` } },
     );
     const colData = await colRes.json();
+    console.log(`Columns retrieved: ${JSON.stringify(colData)}`);
     if (!colRes.ok) {
       throw new Error(`Failed to get columns: ${JSON.stringify(colData)}`);
     }

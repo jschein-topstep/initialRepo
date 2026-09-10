@@ -43,7 +43,7 @@ async function createFoldersInSharepoint(project, token) {
   const hostname = "trivocahealth.sharepoint.com";
   const SITE_PATH_BY_DIVISION = {
     Qual: "/sites/QualitativeProjects",
-    Quant: "/sites/QuantProjects", // adjust if the actual Quant site path differs
+    Quant: "/sites/QuantitativeProjects", // adjust if the actual Quant site path differs
   };
 
   let sitePath;

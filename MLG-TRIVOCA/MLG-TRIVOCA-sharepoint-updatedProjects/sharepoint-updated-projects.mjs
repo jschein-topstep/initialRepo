@@ -16,8 +16,8 @@ const { callSharedUtil } = await import(sharedPath);
 const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
 const SHAREPOINT_HOSTNAME = "trivocahealth.sharepoint.com";
 const SITE_PATH_BY_DIVISION = {
-  Qual: "/sites/QualProjects",
-  Quant: "/sites/QuantProjects", // adjust if the actual Quant site path differs
+  Qual: "/sites/QualitativeProjects",
+  Quant: "/sites/QuantitativeProjects", // adjust if the actual Quant site path differs
 };
 
 // Retrieve projects from SPP read (passed via lambda function call)

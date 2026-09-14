@@ -50,8 +50,8 @@ async function deleteClientListSubfolder(project, token) {
   const hostname = "trivocahealth.sharepoint.com";
 
   const SITE_PATH_BY_DIVISION = {
-    Qual: "/sites/QualProjects",
-    Quant: "/sites/QuantProjects", // adjust if the actual Quant site path differs
+    Qual: "/sites/QualitativeProjects",
+    Quant: "/sites/QuantitativeProjects", // adjust if the actual Quant site path differs
   };
 
   let sitePath;

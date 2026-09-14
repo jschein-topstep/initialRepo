@@ -29,8 +29,8 @@ export const handler = async (event) => {
       // NOTE: this still resolves an AAD user id from project.owner_email for the
       // Team owner role — Graph requires a real user object binding here, so this
       // stays email-based even though the SharePoint metadata below is now free text.
-      //const ownerId = await getUserId(token, project.owner_email); // email of the proj owner
-      //const teamId = await newSharepointTeam(token, project.name, ownerId);
+      const ownerId = await getUserId(token, project.owner_email); // email of the proj owner
+      const teamId = await newSharepointTeam(token, project.name, ownerId);
 
       await createFoldersInSharepoint(project, token);
     }),

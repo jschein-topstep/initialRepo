@@ -274,16 +274,16 @@ Clients*/
     };
   } else if (division === "Quant") {
     columns = {
-      // TODO: fill in Quant site's internal column names once confirmed
-      // via logFolderColumnNames output — placeholders below mirror the
-      // Qual mapping's logical fields for now.
-      ProjectManager: project.owner_name,
-      ProjectCoordinator: project.coordinator_name,
-      ProjectDate: project.start_date.substring(0, 10),
-      ProjectEndDate: project.trv_proj_End_Date__c.substring(0, 10),
-      AccountManager: project.proj_Sales_Rep__c,
-      ProjectStatus: project.proj_Project_Status__c,
-      Client: project.client_name,
+      Project_x0020_Manager: project.owner_name,
+      Project_x0020_Coordinator: project.coordinator_name,
+      Project_x0020_Start_x0020_Date: project.start_date.substring(0, 10),
+      Project_x0020_End_x0020_Date: project.trv_proj_End_Date__c.substring(
+        0,
+        10,
+      ),
+      Account_x0020_Manager: project.proj_Sales_Rep__c,
+      Project_x0020_Status: project.proj_Project_Status__c,
+      Clients: project.client_name,
     };
   } else {
     console.log(

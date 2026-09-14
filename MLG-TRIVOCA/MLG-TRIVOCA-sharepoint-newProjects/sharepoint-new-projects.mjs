@@ -161,6 +161,7 @@ async function createFoldersInSharepoint(project, token) {
     projectFolder.id,
     siteId,
     driveId,
+    project.proj_Division__c,
   );
 
   console.log(`Creating folder structure for: ${project.name}`);
@@ -181,6 +182,7 @@ async function addMetadataToSharepointFolder(
   folderId,
   siteId,
   driveId,
+  division,
 ) {
   console.log(`Entering metadata function`);
   //"LinkFilename", //name?
@@ -201,6 +203,11 @@ async function addMetadataToSharepointFolder(
     const [, year, month, day] = match;
     return `${year}-${month}-${day}T00:00:00Z`;
   }
+
+  // Pulls the column definitions for the document library backing this drive
+  // and logs displayName -> name (the internal/backend name Graph expects
+  // in the fields PATCH below). Handy for re-discovering internal names
+  // (e.g. "Project_x0020_Status") without digging through Site Settings.
   async function logFolderColumnNames(token, driveId) {
     const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
     const res = await fetch(`${GRAPH_BASE}/drives/${driveId}/list/columns`, {
@@ -218,6 +225,7 @@ async function addMetadataToSharepointFolder(
       .map((col) => ({ displayName: col.displayName, name: col.name }));
     console.log(`Writable column names: ${JSON.stringify(columnMap)}`);
   }
+
   async function updateFolderMetadata(token, driveId, itemId, columns) {
     const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
 
@@ -248,17 +256,43 @@ async function addMetadataToSharepointFolder(
 
   await logFolderColumnNames(token, driveId);
 
-  await updateFolderMetadata(token, driveId, folderId, {
-    ProjectManager: project.owner_name,
-    ProjectCoordinator: project.coordinator_name,
-    ProjectDate: project.start_date.substring(0, 10),
-    ProjectEndDate: project.trv_proj_End_Date__c.substring(0, 10),
-    AccountManager: project.proj_Sales_Rep__c,
-    ProjectStatus: project.proj_Project_Status__c,
-    Client: project.client_name,
-    /*FileLeafRef
+  // Qual and Quant sites use different internal column names for the same
+  // logical fields, so the fields payload has to branch on division rather
+  // than being one shared mapping.
+  let columns;
+  if (division === "Qual") {
+    columns = {
+      ProjectManager: project.owner_name,
+      ProjectCoordinator: project.coordinator_name,
+      ProjectDate: project.start_date.substring(0, 10),
+      ProjectEndDate: project.trv_proj_End_Date__c.substring(0, 10),
+      AccountManager: project.proj_Sales_Rep__c,
+      ProjectStatus: project.proj_Project_Status__c,
+      Client: project.client_name,
+      /*FileLeafRef
 Clients*/
-  });
+    };
+  } else if (division === "Quant") {
+    columns = {
+      Project_x0020_Manager: project.owner_name,
+      Project_x0020_Coordinator: project.coordinator_name,
+      Project_x0020_Start_x0020_Date: project.start_date.substring(0, 10),
+      Project_x0020_End_x0020_Date: project.trv_proj_End_Date__c.substring(
+        0,
+        10,
+      ),
+      Account_x0020_Manager: project.proj_Sales_Rep__c,
+      Project_x0020_Status: project.proj_Project_Status__c,
+      Clients: project.client_name,
+    };
+  } else {
+    console.log(
+      `Unrecognized division "${division}" — skipping metadata update for folder ${folderId}`,
+    );
+    return;
+  }
+
+  await updateFolderMetadata(token, driveId, folderId, columns);
 }
 
 // Email project owner once creation is complete (maybe SPP action?)
@@ -351,8 +385,8 @@ async function getGraphToken() {
   const url = `https://login.microsoftonline.com/07df17c1-4112-495c-b15f-76a25f844f3d/oauth2/v2.0/token`;
 
   const params = new URLSearchParams({
-    client_id: "82c08c90-bc61-4af4-ad27-7f7e3d838c1c",
-    client_secret: "A3H8Q~Wo~wbycVR4j4PDSg6mKtkka.HH26z5.cQF",
+    client_id: process.env.GRAPH_CLIENT_ID,
+    client_secret: process.env.GRAPH_CLIENT_SECRET,
     scope: "https://graph.microsoft.com/.default",
     grant_type: "client_credentials",
   });

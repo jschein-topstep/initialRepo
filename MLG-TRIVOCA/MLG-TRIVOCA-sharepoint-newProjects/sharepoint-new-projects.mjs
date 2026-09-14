@@ -201,7 +201,23 @@ async function addMetadataToSharepointFolder(
     const [, year, month, day] = match;
     return `${year}-${month}-${day}T00:00:00Z`;
   }
-
+  async function logFolderColumnNames(token, driveId) {
+    const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
+    const res = await fetch(`${GRAPH_BASE}/drives/${driveId}/list/columns`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      console.log(
+        `Failed to fetch column definitions: ${JSON.stringify(data)}`,
+      );
+      return;
+    }
+    const columnMap = data.value
+      .filter((col) => !col.readOnly) // skip system/computed columns you can't write to
+      .map((col) => ({ displayName: col.displayName, name: col.name }));
+    console.log(`Writable column names: ${JSON.stringify(columnMap)}`);
+  }
   async function updateFolderMetadata(token, driveId, itemId, columns) {
     const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
 
@@ -229,6 +245,9 @@ async function addMetadataToSharepointFolder(
     );
     return data;
   }
+
+  await logFolderColumnNames(token, driveId);
+
   await updateFolderMetadata(token, driveId, folderId, {
     ProjectManager: project.owner_name,
     ProjectCoordinator: project.coordinator_name,

@@ -385,8 +385,8 @@ async function getGraphToken() {
   const url = `https://login.microsoftonline.com/07df17c1-4112-495c-b15f-76a25f844f3d/oauth2/v2.0/token`;
 
   const params = new URLSearchParams({
-    client_id: process.env.GRAPH_CLIENT_ID,
-    client_secret: process.env.GRAPH_CLIENT_SECRET,
+    client_id: "82c08c90-bc61-4af4-ad27-7f7e3d838c1c",
+    client_secret: "A3H8Q~Wo~wbycVR4j4PDSg6mKtkka.HH26z5.cQF",
     scope: "https://graph.microsoft.com/.default",
     grant_type: "client_credentials",
   });

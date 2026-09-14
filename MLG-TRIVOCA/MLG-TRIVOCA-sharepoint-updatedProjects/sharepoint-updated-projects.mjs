@@ -235,6 +235,7 @@ async function createFoldersInSharepoint(project, token) {
     projectFolder.id,
     siteId,
     driveId,
+    project.proj_Division__c,
   );
 
   console.log(`Creating folder structure for: ${project.name}`);
@@ -255,79 +256,117 @@ async function addMetadataToSharepointFolder(
   folderId,
   siteId,
   driveId,
+  division,
 ) {
   console.log(`Entering metadata function`);
   //"LinkFilename", //name?
   // "Account Rep", // not found
-  const RELEVANT_COLUMNS = [
-    "Year",
-    "ProjectManager",
-    "ProjectCoordinator",
-    "Clients",
-    "Account_x0020_Manager",
-  ];
 
-  async function getLibraryColumns(
-    token,
-    siteId,
-    filterNames = RELEVANT_COLUMNS,
-  ) {
-    const listRes = await fetch(
-      `${GRAPH_BASE}/sites/${siteId}/lists/Documents`,
+  // SPP dates come through as "yyyy/MM/dd" strings; SharePoint date columns
+  // via Graph expect ISO 8601. Returns null (rather than throwing) for
+  // missing/malformed input so a bad date doesn't blow up the whole PATCH.
+  function formatSppDateToIso(sppDate) {
+    if (!sppDate) return null;
+
+    const match = /^(\d{4})\/(\d{2})\/(\d{2})$/.exec(sppDate.trim());
+    if (!match) {
+      console.log(`Unrecognized SPP date format: "${sppDate}"`);
+      return null;
+    }
+
+    const [, year, month, day] = match;
+    return `${year}-${month}-${day}T00:00:00Z`;
+  }
+
+  // Pulls the column definitions for the document library backing this drive
+  // and logs displayName -> name (the internal/backend name Graph expects
+  // in the fields PATCH below). Handy for re-discovering internal names
+  // (e.g. "Project_x0020_Status") without digging through Site Settings.
+  async function logFolderColumnNames(token, driveId) {
+    const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
+    const res = await fetch(`${GRAPH_BASE}/drives/${driveId}/list/columns`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      console.log(
+        `Failed to fetch column definitions: ${JSON.stringify(data)}`,
+      );
+      return;
+    }
+    const columnMap = data.value
+      .filter((col) => !col.readOnly) // skip system/computed columns you can't write to
+      .map((col) => ({ displayName: col.displayName, name: col.name }));
+    console.log(`Writable column names: ${JSON.stringify(columnMap)}`);
+  }
+
+  async function updateFolderMetadata(token, driveId, itemId, columns) {
+    const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
+
+    const res = await fetch(
+      `${GRAPH_BASE}/drives/${driveId}/items/${itemId}/listItem/fields`,
       {
-        headers: { Authorization: `Bearer ${token}` },
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(columns),
       },
     );
-    const listData = await listRes.json();
-    if (!listRes.ok) {
+
+    const data = await res.json();
+    if (!res.ok) {
       throw new Error(
-        `Failed to resolve Documents list: ${JSON.stringify(listData)}`,
+        `Metadata update failed for item ${itemId}: ${JSON.stringify(data)}`,
       );
     }
-    const listId = listData.id;
 
-    const colRes = await fetch(
-      `${GRAPH_BASE}/sites/${siteId}/lists/${listId}/columns?$select=name,displayName,columnGroup,hidden,readOnly`,
-      { headers: { Authorization: `Bearer ${token}` } },
+    console.log(
+      `Metadata updated for item ${itemId}: ${JSON.stringify(columns)}`,
     );
-    const colData = await colRes.json();
-    if (!colRes.ok) {
-      throw new Error(`Failed to get columns: ${JSON.stringify(colData)}`);
-    }
-
-    const relevant = colData.value.filter((col) =>
-      filterNames.includes(col.name),
-    );
-
-    relevant.forEach((col) => {
-      console.log(`internal: ${col.name}  |  display: ${col.displayName}`);
-    });
-
-    return relevant;
+    return data;
   }
-  let columns = await getLibraryColumns(token, siteId);
 
-  const spOwnerId = await getSharepointUserId(
-    token,
-    siteId,
-    project.owner_email,
-  );
-  const spCoordinatorId = await getSharepointUserId(
-    token,
-    siteId,
-    project.coordinator_email,
-  );
+  await logFolderColumnNames(token, driveId);
 
-  await updateFolderMetadata(token, driveId, folderId, {
-    Year: String(new Date().getFullYear()),
-    ProjectManagerLookupId: spOwnerId,
-    ProjectCoordinatorLookupId: spCoordinatorId,
-    Clients: "Dexcom",
-    /*FileLeafRef
-Account_x0020_Manager (confirm)
-Clients
-ProjectCoordinator*/
-  });
+  // Qual and Quant sites use different internal column names for the same
+  // logical fields, so the fields payload has to branch on division rather
+  // than being one shared mapping.
+  let columns;
+  if (division === "Qual") {
+    columns = {
+      ProjectManager: project.owner_name,
+      ProjectCoordinator: project.coordinator_name,
+      ProjectDate: project.start_date.substring(0, 10),
+      ProjectEndDate: project.trv_proj_End_Date__c.substring(0, 10),
+      AccountManager: project.proj_Sales_Rep__c,
+      ProjectStatus: project.proj_Project_Status__c,
+      Client: project.client_name,
+      /*FileLeafRef
+Clients*/
+    };
+  } else if (division === "Quant") {
+    columns = {
+      Project_x0020_Manager: project.owner_name,
+      Project_x0020_Coordinator: project.coordinator_name,
+      Project_x0020_Start_x0020_Date: project.start_date.substring(0, 10),
+      Project_x0020_End_x0020_Date: project.trv_proj_End_Date__c.substring(
+        0,
+        10,
+      ),
+      Account_x0020_Manager: project.proj_Sales_Rep__c,
+      Project_x0020_Status: project.proj_Project_Status__c,
+      Clients: project.client_name,
+    };
+  } else {
+    console.log(
+      `Unrecognized division "${division}" — skipping metadata update for folder ${folderId}`,
+    );
+    return;
+  }
+
+  await updateFolderMetadata(token, driveId, folderId, columns);
 }
 
 // Email project owner once creation is complete (maybe SPP action?)

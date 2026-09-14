@@ -274,16 +274,16 @@ Clients*/
     };
   } else if (division === "Quant") {
     columns = {
-      Project_x0020_Manager: project.owner_name,
-      Project_x0020_Coordinator: project.coordinator_name,
-      Project_x0020_Start_x0020_Date: project.start_date.substring(0, 10),
-      Project_x0020_End_x0020_Date: project.trv_proj_End_Date__c.substring(
-        0,
-        10,
-      ),
-      Account_x0020_Manager: project.proj_Sales_Rep__c,
-      Project_x0020_Status: project.proj_Project_Status__c,
-      Clients: project.client_name,
+      // TODO: fill in Quant site's internal column names once confirmed
+      // via logFolderColumnNames output — placeholders below mirror the
+      // Qual mapping's logical fields for now.
+      ProjectManager: project.owner_name,
+      ProjectCoordinator: project.coordinator_name,
+      ProjectDate: project.start_date.substring(0, 10),
+      ProjectEndDate: project.trv_proj_End_Date__c.substring(0, 10),
+      AccountManager: project.proj_Sales_Rep__c,
+      ProjectStatus: project.proj_Project_Status__c,
+      Client: project.client_name,
     };
   } else {
     console.log(
@@ -385,8 +385,8 @@ async function getGraphToken() {
   const url = `https://login.microsoftonline.com/07df17c1-4112-495c-b15f-76a25f844f3d/oauth2/v2.0/token`;
 
   const params = new URLSearchParams({
-    client_id: "82c08c90-bc61-4af4-ad27-7f7e3d838c1c",
-    client_secret: "A3H8Q~Wo~wbycVR4j4PDSg6mKtkka.HH26z5.cQF",
+    client_id: process.env.GRAPH_CLIENT_ID,
+    client_secret: process.env.GRAPH_CLIENT_SECRET,
     scope: "https://graph.microsoft.com/.default",
     grant_type: "client_credentials",
   });
@@ -406,23 +406,50 @@ async function getGraphToken() {
 
   return data.access_token;
 }
+const FALLBACK_OWNER_EMAIL = "unassigned.pm@trivoca.com";
+
+// Resolves an AAD user object id from an email/UPN. If upnOrEmail is
+// missing or doesn't resolve to a real user, falls back to a shared
+// "unassigned" mailbox so Team creation always has a valid owner rather
+// than failing outright on bad/missing project owner data.
 async function getUserId(token, upnOrEmail) {
   const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
 
-  const res = await fetch(
-    `${GRAPH_BASE}/users/${encodeURIComponent(upnOrEmail)}?$select=id,displayName,userPrincipalName`,
-    {
-      headers: { Authorization: `Bearer ${token}` },
-    },
-  );
+  async function lookupUser(email) {
+    const res = await fetch(
+      `${GRAPH_BASE}/users/${encodeURIComponent(email)}?$select=id,displayName,userPrincipalName`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    );
+    const data = await res.json();
+    return { ok: res.ok, data };
+  }
 
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(
-      `Failed to resolve user "${upnOrEmail}": ${JSON.stringify(data)}`,
+  if (!upnOrEmail) {
+    console.log(
+      `No owner_email provided, falling back to ${FALLBACK_OWNER_EMAIL}`,
+    );
+  } else {
+    const { ok, data } = await lookupUser(upnOrEmail);
+    if (ok) {
+      console.log(`Resolved user: ${data.userPrincipalName} -> id: ${data.id}`);
+      return data.id;
+    }
+    console.log(
+      `Failed to resolve user "${upnOrEmail}", falling back to ${FALLBACK_OWNER_EMAIL}: ${JSON.stringify(data)}`,
     );
   }
 
-  console.log(`Resolved user: ${data.userPrincipalName} -> id: ${data.id}`);
+  const { ok, data } = await lookupUser(FALLBACK_OWNER_EMAIL);
+  if (!ok) {
+    throw new Error(
+      `Failed to resolve fallback user "${FALLBACK_OWNER_EMAIL}": ${JSON.stringify(data)}`,
+    );
+  }
+
+  console.log(
+    `Resolved fallback user: ${data.userPrincipalName} -> id: ${data.id}`,
+  );
   return data.id;
 }

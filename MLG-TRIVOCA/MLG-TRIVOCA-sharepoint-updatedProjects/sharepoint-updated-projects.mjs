@@ -330,36 +330,8 @@ async function addMetadataToSharepointFolder(
 
   await logFolderColumnNames(token, driveId);
 
-  // Qual and Quant sites use different internal column names for the same
-  // logical fields, so the fields payload has to branch on division rather
-  // than being one shared mapping.
-  let columns;
-  if (division === "Qual") {
-    columns = {
-      ProjectManager: project.owner_name,
-      ProjectCoordinator: project.coordinator_name,
-      ProjectDate: project.start_date.substring(0, 10),
-      ProjectEndDate: project.trv_proj_End_Date__c.substring(0, 10),
-      AccountManager: project.proj_Sales_Rep__c,
-      ProjectStatus: project.proj_Project_Status__c,
-      Client: project.client_name,
-      /*FileLeafRef
-Clients*/
-    };
-  } else if (division === "Quant") {
-    columns = {
-      Project_x0020_Manager: project.owner_name,
-      Project_x0020_Coordinator: project.coordinator_name,
-      Project_x0020_Start_x0020_Date: project.start_date.substring(0, 10),
-      Project_x0020_End_x0020_Date: project.trv_proj_End_Date__c.substring(
-        0,
-        10,
-      ),
-      Account_x0020_Manager: project.proj_Sales_Rep__c,
-      Project_x0020_Status: project.proj_Project_Status__c,
-      Clients: project.client_name,
-    };
-  } else {
+  const columns = buildDivisionMetadataColumns(project, division);
+  if (!columns) {
     console.log(
       `Unrecognized division "${division}" — skipping metadata update for folder ${folderId}`,
     );
@@ -630,7 +602,19 @@ async function updateSharepointForProject(project, token) {
       siteId,
       project.coordinator_email,
     );
+
+    const metadataColumns = buildDivisionMetadataColumns(
+      project,
+      project.proj_Division__c,
+    );
+    if (!metadataColumns) {
+      console.log(
+        `Unrecognized division "${project.proj_Division__c}" — skipping metadata field update for "${project.name}", updating owner/coordinator lookups only.`,
+      );
+    }
+
     await updateFolderMetadata(token, driveId, folder.id, {
+      ...(metadataColumns || {}),
       ProjectManagerLookupId: spOwnerId,
       ProjectCoordinatorLookupId: spCoordinatorId,
     });
@@ -705,4 +689,37 @@ async function getUserId(token, upnOrEmail) {
 
   console.log(`Resolved user: ${data.userPrincipalName} -> id: ${data.id}`);
   return data.id;
+}
+// Builds the division-specific metadata columns object. Shared by the create
+// path (addMetadataToSharepointFolder) and the update path
+// (updateSharepointForProject) so the Qual/Quant field-name mapping only
+// lives in one place. Returns null for an unrecognized division so callers
+// can decide how to handle that case.
+function buildDivisionMetadataColumns(project, division) {
+  if (division === "Qual") {
+    return {
+      ProjectManager: project.owner_name,
+      ProjectCoordinator: project.coordinator_name,
+      ProjectDate: project.start_date.substring(0, 10),
+      ProjectEndDate: project.trv_proj_End_Date__c.substring(0, 10),
+      AccountManager: project.proj_Sales_Rep__c,
+      ProjectStatus: project.proj_Project_Status__c,
+      Client: project.client_name,
+    };
+  }
+  if (division === "Quant") {
+    return {
+      Project_x0020_Manager: project.owner_name,
+      Project_x0020_Coordinator: project.coordinator_name,
+      Project_x0020_Start_x0020_Date: project.start_date.substring(0, 10),
+      Project_x0020_End_x0020_Date: project.trv_proj_End_Date__c.substring(
+        0,
+        10,
+      ),
+      Account_x0020_Manager: project.proj_Sales_Rep__c,
+      Project_x0020_Status: project.proj_Project_Status__c,
+      Clients: project.client_name,
+    };
+  }
+  return null;
 }

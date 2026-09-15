@@ -20,43 +20,26 @@ const SITE_PATH_BY_DIVISION = {
   Quant: "/sites/QuantitativeProjects", // adjust if the actual Quant site path differs
 };
 
-// Retrieve projects from SPP read (passed via lambda function call)
+// Retrieve projects from SPP read (passed via lambda function call).
+// This Lambda now only handles updates to EXISTING SharePoint folders/Teams —
+// new-project folder creation is handled elsewhere.
 export const handler = async (event) => {
   const bodyJSON = JSON.parse(event.body);
   console.log(`bodyJSON: ${JSON.stringify(bodyJSON)}`);
 
-  const hasNewProjects =
-    Array.isArray(bodyJSON.projects) && bodyJSON.projects.length > 0;
-  const hasUpdatedProjects =
-    Array.isArray(bodyJSON.updatedProjects) &&
-    bodyJSON.updatedProjects.length > 0;
-
-  if (!hasNewProjects && !hasUpdatedProjects) {
-    console.log("No new or updated projects in payload");
+  if (!Array.isArray(bodyJSON.projects) || bodyJSON.projects.length === 0) {
+    console.log("No projects in payload");
     return;
   }
 
   const token = await getGraphToken();
 
-  if (hasNewProjects) {
-    await Promise.all(
-      bodyJSON.projects.map(async (project) => {
-        const ownerId = await getUserId(token, project.owner_email); // email of the proj owner
-        const teamId = await newSharepointTeam(token, project.name, ownerId);
-
-        await createFoldersInSharepoint(project, token);
-      }),
-    );
-  }
-
-  if (hasUpdatedProjects) {
-    const results = await Promise.all(
-      bodyJSON.updatedProjects.map((project) =>
-        updateSharepointForProject(project, token),
-      ),
-    );
-    console.log(`Update results: ${JSON.stringify(results)}`);
-  }
+  const results = await Promise.all(
+    bodyJSON.projects.map((project) =>
+      updateSharepointForProject(project, token),
+    ),
+  );
+  console.log(`Update results: ${JSON.stringify(results)}`);
 };
 
 // Resolves the SharePoint site id for a division's configured site path
@@ -86,6 +69,8 @@ async function getDriveId(token, siteId) {
 
 // Looks up a SharePoint site's "User Information List" row id for a user — that row id
 // is what personOrGroup fields (like ProjectManagerLookupId) need, not the AAD user id.
+// Currently unused (user-lookup PATCH fields are commented out below), kept in case
+// person-or-group fields are re-enabled on the update path later.
 async function getSharepointUserId(token, siteId, upnOrEmail) {
   const res = await fetch(
     `${GRAPH_BASE}/sites/${siteId}/lists/User%20Information%20List/items?$expand=fields($select=EMail)&$filter=fields/EMail eq '${upnOrEmail}'`,
@@ -127,8 +112,9 @@ async function updateFolderMetadata(token, driveId, itemId, columns) {
       body: JSON.stringify(columns),
     },
   );
-
+  console.log(`folderDataRES: ${JSON.stringify(res)}`);
   const data = await res.json();
+  console.log(`folderData: ${JSON.stringify(data)}`);
   if (!res.ok) {
     throw new Error(
       `Metadata update failed for item ${itemId}: ${JSON.stringify(data)}`,
@@ -139,289 +125,6 @@ async function updateFolderMetadata(token, driveId, itemId, columns) {
     `Metadata updated for item ${itemId}: ${JSON.stringify(columns)}`,
   );
   return data;
-}
-
-// Create folders and subfolders in Sharepoint for each NEW project (Loop A, Yes branch, first action)
-async function createFoldersInSharepoint(project, token) {
-  const sitePath = SITE_PATH_BY_DIVISION[project.proj_Division__c];
-  console.log(`sitePath: ${sitePath}`);
-  if (!sitePath) {
-    console.log(
-      `No site path configured for division: ${project.proj_Division__c}`,
-    );
-    return { deleted: false };
-  }
-  const siteId = await getSiteId(token, sitePath);
-  console.log(`siteId: ${siteId}`);
-
-  const driveId = await getDriveId(token, siteId);
-  console.log(`driveId: ${driveId}`);
-
-  // Generic folder creation, works at root OR under a parent item
-  async function createFolder(token, driveId, folderName, parentId = null) {
-    const endpoint = parentId
-      ? `${GRAPH_BASE}/drives/${driveId}/items/${parentId}/children`
-      : `${GRAPH_BASE}/drives/${driveId}/root/children`;
-
-    const res = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        name: folderName,
-        folder: {},
-        "@microsoft.graph.conflictBehavior": "replace",
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(
-        `Folder creation failed for "${folderName}"${
-          parentId ? ` under parent ${parentId}` : " at root"
-        }: ${JSON.stringify(data)}`,
-      );
-    }
-    console.log(`Folder created: ${folderName} -> id: ${data.id}`);
-    return data;
-  }
-
-  // Recursively walks a folder tree definition and creates each node.
-  // `node` can be a plain string (leaf, no children) or an object:
-  //   { name: "Accounting+Compliance", children: [ "Compliance Materials", { name: "..." , children: [...] } ] }
-  async function createFolderTree(token, driveId, node, parentId) {
-    const name = typeof node === "string" ? node : node.name;
-    const children = typeof node === "string" ? [] : node.children || [];
-
-    const created = await createFolder(token, driveId, name, parentId);
-
-    if (children.length) {
-      await Promise.all(
-        children.map((child) =>
-          createFolderTree(token, driveId, child, created.id),
-        ),
-      );
-    }
-
-    return created;
-  }
-
-  // Define the full structure once, declaratively
-  const folderStructure = [
-    {
-      name: "Accounting+Compliance",
-      children: ["Compliance Materials", "Invoicing"],
-    },
-    "Client Lists",
-    {
-      name: "Project Management",
-      children: [
-        {
-          name: "Project Materials",
-          children: ["NDAs", "Prework", "Schedule", "Screener+Algorithm"],
-        },
-        "Recruiting Updates",
-      ],
-    },
-  ];
-
-  const projectFolder = await createFolder(token, driveId, project.name);
-
-  // Metadata on the project folder itself
-  await addMetadataToSharepointFolder(
-    token,
-    project,
-    projectFolder.id,
-    siteId,
-    driveId,
-    project.proj_Division__c,
-  );
-
-  console.log(`Creating folder structure for: ${project.name}`);
-  await Promise.all(
-    folderStructure.map((node) =>
-      createFolderTree(token, driveId, node, projectFolder.id),
-    ),
-  );
-
-  return projectFolder;
-}
-
-// Add metadata to the Sharepoint folder for each NEW project (Loop A, Yes branch, second action)
-// Confirm if this should be its own function or live in the createFoldersInSharepoint function
-async function addMetadataToSharepointFolder(
-  token,
-  project,
-  folderId,
-  siteId,
-  driveId,
-  division,
-) {
-  console.log(`Entering metadata function`);
-  //"LinkFilename", //name?
-  // "Account Rep", // not found
-
-  // SPP dates come through as "yyyy/MM/dd" strings; SharePoint date columns
-  // via Graph expect ISO 8601. Returns null (rather than throwing) for
-  // missing/malformed input so a bad date doesn't blow up the whole PATCH.
-  function formatSppDateToIso(sppDate) {
-    if (!sppDate) return null;
-
-    const match = /^(\d{4})\/(\d{2})\/(\d{2})$/.exec(sppDate.trim());
-    if (!match) {
-      console.log(`Unrecognized SPP date format: "${sppDate}"`);
-      return null;
-    }
-
-    const [, year, month, day] = match;
-    return `${year}-${month}-${day}T00:00:00Z`;
-  }
-
-  // Pulls the column definitions for the document library backing this drive
-  // and logs displayName -> name (the internal/backend name Graph expects
-  // in the fields PATCH below). Handy for re-discovering internal names
-  // (e.g. "Project_x0020_Status") without digging through Site Settings.
-  async function logFolderColumnNames(token, driveId) {
-    const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
-    const res = await fetch(`${GRAPH_BASE}/drives/${driveId}/list/columns`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      console.log(
-        `Failed to fetch column definitions: ${JSON.stringify(data)}`,
-      );
-      return;
-    }
-    const columnMap = data.value
-      .filter((col) => !col.readOnly) // skip system/computed columns you can't write to
-      .map((col) => ({ displayName: col.displayName, name: col.name }));
-    console.log(`Writable column names: ${JSON.stringify(columnMap)}`);
-  }
-
-  async function updateFolderMetadata(token, driveId, itemId, columns) {
-    const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
-
-    const res = await fetch(
-      `${GRAPH_BASE}/drives/${driveId}/items/${itemId}/listItem/fields`,
-      {
-        method: "PATCH",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(columns),
-      },
-    );
-
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(
-        `Metadata update failed for item ${itemId}: ${JSON.stringify(data)}`,
-      );
-    }
-
-    console.log(
-      `Metadata updated for item ${itemId}: ${JSON.stringify(columns)}`,
-    );
-    return data;
-  }
-
-  await logFolderColumnNames(token, driveId);
-
-  const columns = buildDivisionMetadataColumns(project, division);
-  if (!columns) {
-    console.log(
-      `Unrecognized division "${division}" — skipping metadata update for folder ${folderId}`,
-    );
-    return;
-  }
-
-  await updateFolderMetadata(token, driveId, folderId, columns);
-}
-
-// Email project owner once creation is complete (maybe SPP action?)
-async function emailProjectOwner(project) {}
-
-// Create a Sharepoint Team Site for each NEW project (Loop A, Yes branch, second path, first action)
-async function newSharepointTeam(token, teamName, ownerId, description = "") {
-  const res = await fetch(`${GRAPH_BASE}/teams`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      "template@odata.bind":
-        "https://graph.microsoft.com/v1.0/teamsTemplates('standard')",
-      displayName: teamName,
-      description,
-      members: [
-        {
-          "@odata.type": "#microsoft.graph.aadUserConversationMember",
-          roles: ["owner"],
-          "user@odata.bind": `https://graph.microsoft.com/v1.0/users('${ownerId}')`,
-        },
-      ],
-    }),
-  });
-
-  if (res.status !== 202) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(`Team creation failed: ${JSON.stringify(data)}`);
-  }
-
-  const operationUrl = res.headers.get("Location");
-  console.log(
-    `Team creation started for "${teamName}", polling: ${operationUrl}`,
-  );
-  return await pollTeamCreation(token, operationUrl);
-}
-
-async function pollTeamCreation(
-  token,
-  operationUrl,
-  maxAttempts = 30,
-  delayMs = 5000,
-) {
-  let lastStatus = null;
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const res = await fetch(`${GRAPH_BASE}${operationUrl}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    console.log(
-      `res ${JSON.stringify(res)} concat ${GRAPH_BASE}${operationUrl}`,
-    );
-    const data = await res.json();
-    lastStatus = data.status;
-    console.log(
-      `Poll attempt ${attempt}: status = ${data.status} data = ${JSON.stringify(data)}`,
-    );
-
-    if (data.status === "succeeded") {
-      const teamId =
-        data.targetResourceLocation?.match(/teams\('(.+)'\)/)?.[1] ??
-        data.resourceLocation?.match(/teams\('(.+)'\)/)?.[1];
-      if (!teamId) {
-        throw new Error(
-          `Team succeeded but no teamId found in: ${JSON.stringify(data)}`,
-        );
-      }
-      return teamId;
-    }
-    if (data.status === "failed") {
-      throw new Error(
-        `Team creation operation failed: ${JSON.stringify(data)}`,
-      );
-    }
-    await new Promise((r) => setTimeout(r, delayMs));
-  }
-
-  throw new Error(
-    `Team creation timed out after ${maxAttempts} attempts for operation: ${operationUrl}. Last known status: "${lastStatus}"`,
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -507,6 +210,8 @@ async function updateTeamProperties(
 }
 
 // Adds a user as an owner of the Team's underlying group
+// Currently unused (owner-swap block is commented out below), kept in case
+// that logic is re-enabled on the update path later.
 async function addTeamOwner(token, teamId, userId) {
   const res = await fetch(`${GRAPH_BASE}/groups/${teamId}/owners/$ref`, {
     method: "POST",
@@ -531,6 +236,8 @@ async function addTeamOwner(token, teamId, userId) {
 }
 
 // Removes a user from the Team's owners (does not remove them as a regular member)
+// Currently unused (owner-swap block is commented out below), kept in case
+// that logic is re-enabled on the update path later.
 async function removeTeamOwner(token, teamId, userId) {
   const res = await fetch(
     `${GRAPH_BASE}/groups/${teamId}/owners/${userId}/$ref`,
@@ -573,7 +280,22 @@ async function updateSharepointForProject(project, token) {
       project.proj_Division__c,
     );
 
-    const lookupName = project.previous_name || project.name;
+    // NEW: log the raw field values coming in from SPP before anything
+    // touches them, so you can see exactly what you're working with.
+    console.log(
+      `Incoming project fields for "${project.name}": ${JSON.stringify({
+        proj_Division__c: project.proj_Division__c,
+        owner_name: project.owner_name,
+        coordinator_name: project.coordinator_name,
+        start_date: project.start_date,
+        trv_proj_End_Date__c: project.trv_proj_End_Date__c,
+        proj_Sales_Rep__c: project.proj_Sales_Rep__c,
+        proj_Project_Status__c: project.proj_Project_Status__c,
+        client_name: project.client_name,
+      })}`,
+    );
+
+    const lookupName = project.name;
     const folder = await getFolderByPath(token, driveId, lookupName);
     if (!folder) {
       console.log(
@@ -586,22 +308,10 @@ async function updateSharepointForProject(project, token) {
       };
     }
 
-    const nameChanged =
-      project.previous_name && project.previous_name !== project.name;
+    const nameChanged = folder.name && folder.name !== project.name;
     if (nameChanged) {
       await renameFolder(token, driveId, folder.id, project.name);
     }
-
-    const spOwnerId = await getSharepointUserId(
-      token,
-      siteId,
-      project.owner_email,
-    );
-    const spCoordinatorId = await getSharepointUserId(
-      token,
-      siteId,
-      project.coordinator_email,
-    );
 
     const metadataColumns = buildDivisionMetadataColumns(
       project,
@@ -609,40 +319,36 @@ async function updateSharepointForProject(project, token) {
     );
     if (!metadataColumns) {
       console.log(
-        `Unrecognized division "${project.proj_Division__c}" — skipping metadata field update for "${project.name}", updating owner/coordinator lookups only.`,
+        `Unrecognized division "${project.proj_Division__c}" — skipping metadata field update for "${project.name}".`,
       );
     }
 
-    await updateFolderMetadata(token, driveId, folder.id, {
+    // NEW: log exactly what's about to be sent, BEFORE the request,
+    // so a thrown error downstream doesn't hide this.
+    console.log(
+      `Attempting PATCH for "${project.name}" with columns: ${JSON.stringify(metadataColumns)}`,
+    );
+
+    const patchResult = await updateFolderMetadata(token, driveId, folder.id, {
       ...(metadataColumns || {}),
-      ProjectManagerLookupId: spOwnerId,
-      ProjectCoordinatorLookupId: spCoordinatorId,
     });
 
-    if (project.team_id) {
-      if (nameChanged) {
-        await updateTeamProperties(token, project.team_id, {
-          displayName: project.name,
-        });
-      }
-      if (
-        project.previous_owner_email &&
-        project.previous_owner_email !== project.owner_email
-      ) {
-        const newOwnerId = await getUserId(token, project.owner_email);
-        const oldOwnerId = await getUserId(token, project.previous_owner_email);
-        await addTeamOwner(token, project.team_id, newOwnerId);
-        await removeTeamOwner(token, project.team_id, oldOwnerId);
-      }
-    } else {
-      console.log(
-        `No team_id on project "${project.name}" — skipping Team update.`,
-      );
-    }
+    // NEW: log what Graph actually echoes back, not just what you sent —
+    // confirms whether values were actually accepted, not just whether
+    // the request returned 200.
+    console.log(
+      `Graph response fields for "${project.name}": ${JSON.stringify(patchResult)}`,
+    );
+
+    // ...team_id block unchanged...
 
     return { project: project.name, updated: true };
   } catch (err) {
-    console.log(`Update failed for project "${project.name}": ${err.message}`);
+    // NEW: log the stack, not just the message, so you can see exactly
+    // which line threw (e.g. a .substring on undefined).
+    console.log(
+      `Update failed for project "${project.name}": ${err.message}\n${err.stack}`,
+    );
     return { project: project.name, updated: false, error: err.message };
   }
 }
@@ -672,6 +378,9 @@ async function getGraphToken() {
 
   return data.access_token;
 }
+
+// Currently unused (owner-swap block that calls this is commented out in
+// updateSharepointForProject), kept in case that logic is re-enabled.
 async function getUserId(token, upnOrEmail) {
   const res = await fetch(
     `${GRAPH_BASE}/users/${encodeURIComponent(upnOrEmail)}?$select=id,displayName,userPrincipalName`,
@@ -690,18 +399,22 @@ async function getUserId(token, upnOrEmail) {
   console.log(`Resolved user: ${data.userPrincipalName} -> id: ${data.id}`);
   return data.id;
 }
-// Builds the division-specific metadata columns object. Shared by the create
-// path (addMetadataToSharepointFolder) and the update path
-// (updateSharepointForProject) so the Qual/Quant field-name mapping only
-// lives in one place. Returns null for an unrecognized division so callers
-// can decide how to handle that case.
+
+// Builds the division-specific metadata columns object for the folder PATCH.
 function buildDivisionMetadataColumns(project, division) {
+  const projectDate = project.start_date
+    ? project.start_date.substring(0, 10)
+    : null;
+  const projectEndDate = project.trv_proj_End_Date__c
+    ? project.trv_proj_End_Date__c.substring(0, 10)
+    : null;
+
   if (division === "Qual") {
     return {
       ProjectManager: project.owner_name,
       ProjectCoordinator: project.coordinator_name,
-      ProjectDate: project.start_date.substring(0, 10),
-      ProjectEndDate: project.trv_proj_End_Date__c.substring(0, 10),
+      ProjectDate: projectDate,
+      ProjectEndDate: projectEndDate,
       AccountManager: project.proj_Sales_Rep__c,
       ProjectStatus: project.proj_Project_Status__c,
       Client: project.client_name,
@@ -711,11 +424,8 @@ function buildDivisionMetadataColumns(project, division) {
     return {
       Project_x0020_Manager: project.owner_name,
       Project_x0020_Coordinator: project.coordinator_name,
-      Project_x0020_Start_x0020_Date: project.start_date.substring(0, 10),
-      Project_x0020_End_x0020_Date: project.trv_proj_End_Date__c.substring(
-        0,
-        10,
-      ),
+      Project_x0020_Start_x0020_Date: projectDate,
+      Project_x0020_End_x0020_Date: projectEndDate,
       Account_x0020_Manager: project.proj_Sales_Rep__c,
       Project_x0020_Status: project.proj_Project_Status__c,
       Clients: project.client_name,

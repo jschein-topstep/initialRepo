@@ -33,6 +33,7 @@ export const handler = async (event) => {
       const teamId = await newSharepointTeam(token, project.name, ownerId);
 
       await createFoldersInSharepoint(project, token);
+      await emailProjectOwner(project, token);
     }),
   );
 };
@@ -452,4 +453,49 @@ async function getUserId(token, upnOrEmail) {
     `Resolved fallback user: ${data.userPrincipalName} -> id: ${data.id}`,
   );
   return data.id;
+}
+// Emails the project owner once their SharePoint folders AND Team have been
+// created — call this last, after both createFoldersInSharepoint and
+// newSharepointTeam have resolved for the project. Sends AS a real mailbox
+// in the tenant (app-only Mail.Send requires this); recipient can be any
+// valid address, since project.owner_email comes straight from SPP.
+async function emailProjectOwner(project, token) {
+  const FROM_MAILBOX = "ryan.kroger@trivoca.com";
+
+  const message = {
+    message: {
+      subject: `SharePoint site ready: ${project.name}`,
+      body: {
+        contentType: "Text",
+        content: `Hi,\n\nThe SharePoint folder structure and Team for "${project.name}" have been created and are ready to use.\n\nThanks,\nAutomation`,
+      },
+      toRecipients: [{ emailAddress: { address: project.owner_email } }],
+    },
+    saveToSentItems: true,
+  };
+
+  const res = await fetch(
+    `${GRAPH_BASE}/users/${encodeURIComponent(FROM_MAILBOX)}/sendMail`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(message),
+    },
+  );
+
+  // sendMail returns 202 with an EMPTY body on success — only parse JSON
+  // on the error path, or res.json() will throw on the happy path.
+  if (res.status !== 202) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(
+      `Failed to send folder-ready email for "${project.name}" to ${project.owner_email}: ${JSON.stringify(data)}`,
+    );
+  }
+
+  console.log(
+    `Sent folder-ready email to ${project.owner_email} for "${project.name}"`,
+  );
 }

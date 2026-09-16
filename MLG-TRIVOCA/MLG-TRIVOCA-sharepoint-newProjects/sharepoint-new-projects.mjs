@@ -5,54 +5,111 @@ const sharedPath = process.env.AWS_LAMBDA_FUNCTION_NAME
   ? "/opt/nodejs/sharedUtils.js"
   : "../../shared/sharedUtils.js";
 const { callSharedUtil } = await import(sharedPath);
-//may not need spp creds
-/*const authObj = {
+
+// SPP credentials, pulled from Lambda environment variables, used for the
+// writeback call (tslib-putRecords) once SharePoint provisioning succeeds.
+const authObj = {
   company: process.env.COMPANY,
   user: process.env.USER,
   password: process.env.PASSWORD,
   instance: process.env.INSTANCE,
-};*/
+};
 
-// Retrieve projects from SPP read (passed via lambda function call)
+const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
+const SHAREPOINT_HOSTNAME = "trivocahealth.sharepoint.com";
+const SITE_PATH_BY_DIVISION = {
+  Qual: "/sites/QualitativeProjects",
+  Quant: "/sites/QuantitativeProjects", // adjust if the actual Quant site path differs
+};
+
+// Mailbox used to send the "your folders/Team are ready" notification.
+// Must be a real mailbox in the tenant — app-only Mail.Send sends AS this
+// user, not as the project owner. Recipient (project.owner_email) can be
+// any valid address.
+const NOTIFICATION_FROM_MAILBOX = "rschein@topstepllc.com";
+
+// Retrieve NEW projects from SPP (passed via lambda function call) and
+// provision SharePoint folders + a Team for each. Handles updates to
+// EXISTING projects in a separate Lambda.
 export const handler = async (event) => {
   const bodyJSON = JSON.parse(event.body);
   console.log(`bodyJSON: ${JSON.stringify(bodyJSON)}`);
 
   if (!Array.isArray(bodyJSON.projects) || bodyJSON.projects.length === 0) {
-    console.log("No projects in payload");
+    console.log("No new projects in payload");
     return;
   }
+
   const token = await getGraphToken();
 
   await Promise.all(
     bodyJSON.projects.map(async (project) => {
-      // NOTE: this still resolves an AAD user id from project.owner_email for the
-      // Team owner role — Graph requires a real user object binding here, so this
-      // stays email-based even though the SharePoint metadata below is now free text.
       const ownerId = await getUserId(token, project.owner_email); // email of the proj owner
       const teamId = await newSharepointTeam(token, project.name, ownerId);
+      const projectFolder = await createFoldersInSharepoint(project, token);
 
-      await createFoldersInSharepoint(project, token);
+      await writeSharepointIdsToSpp(project, projectFolder.id, teamId, authObj);
+
       await emailProjectOwner(project, token);
     }),
   );
 };
 
+// Resolves the SharePoint site id for a division's configured site path
+async function getSiteId(token, sitePath) {
+  const res = await fetch(
+    `${GRAPH_BASE}/sites/${SHAREPOINT_HOSTNAME}:${sitePath}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+  const data = await res.json();
+  if (!res.ok)
+    throw new Error(`Failed to resolve site: ${JSON.stringify(data)}`);
+  return data.id;
+}
+
+// Resolves the default document library's drive id for a site
+async function getDriveId(token, siteId) {
+  const res = await fetch(`${GRAPH_BASE}/sites/${siteId}/drive`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = await res.json();
+  if (!res.ok)
+    throw new Error(`Failed to resolve drive: ${JSON.stringify(data)}`);
+  return data.id;
+}
+
+// Patches list-item fields (metadata) on a drive item, e.g. the project folder
+async function updateFolderMetadata(token, driveId, itemId, columns) {
+  const res = await fetch(
+    `${GRAPH_BASE}/drives/${driveId}/items/${itemId}/listItem/fields`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(columns),
+    },
+  );
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(
+      `Metadata update failed for item ${itemId}: ${JSON.stringify(data)}`,
+    );
+  }
+
+  console.log(
+    `Metadata updated for item ${itemId}: ${JSON.stringify(columns)}`,
+  );
+  return data;
+}
+
 // Create folders and subfolders in Sharepoint for each NEW project (Loop A, Yes branch, first action)
 async function createFoldersInSharepoint(project, token) {
-  const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
-  const hostname = "trivocahealth.sharepoint.com";
-  const SITE_PATH_BY_DIVISION = {
-    Qual: "/sites/QualitativeProjects",
-    Quant: "/sites/QuantitativeProjects", // adjust if the actual Quant site path differs
-  };
-
-  let sitePath;
-  if (project.proj_Division__c == "Qual") {
-    sitePath = SITE_PATH_BY_DIVISION.Qual;
-  } else if (project.proj_Division__c == "Quant") {
-    sitePath = SITE_PATH_BY_DIVISION.Quant;
-  }
+  const sitePath = SITE_PATH_BY_DIVISION[project.proj_Division__c];
   console.log(`sitePath: ${sitePath}`);
   if (!sitePath) {
     console.log(
@@ -60,27 +117,9 @@ async function createFoldersInSharepoint(project, token) {
     );
     return { deleted: false };
   }
-  async function getSiteId(token) {
-    const res = await fetch(`${GRAPH_BASE}/sites/${hostname}:${sitePath}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const data = await res.json();
-    if (!res.ok)
-      throw new Error(`Failed to resolve site: ${JSON.stringify(data)}`);
-    return data.id;
-  }
-  const siteId = await getSiteId(token);
+  const siteId = await getSiteId(token, sitePath);
   console.log(`siteId: ${siteId}`);
 
-  async function getDriveId(token, siteId) {
-    const res = await fetch(`${GRAPH_BASE}/sites/${siteId}/drive`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const data = await res.json();
-    if (!res.ok)
-      throw new Error(`Failed to resolve drive: ${JSON.stringify(data)}`);
-    return data.id;
-  }
   const driveId = await getDriveId(token, siteId);
   console.log(`driveId: ${driveId}`);
 
@@ -176,7 +215,6 @@ async function createFoldersInSharepoint(project, token) {
 }
 
 // Add metadata to the Sharepoint folder for each NEW project (Loop A, Yes branch, second action)
-// Confirm if this should be its own function or live in the createFoldersInSharepoint function
 async function addMetadataToSharepointFolder(
   token,
   project,
@@ -186,31 +224,12 @@ async function addMetadataToSharepointFolder(
   division,
 ) {
   console.log(`Entering metadata function`);
-  //"LinkFilename", //name?
-  // "Account Rep", // not found
-
-  // SPP dates come through as "yyyy/MM/dd" strings; SharePoint date columns
-  // via Graph expect ISO 8601. Returns null (rather than throwing) for
-  // missing/malformed input so a bad date doesn't blow up the whole PATCH.
-  function formatSppDateToIso(sppDate) {
-    if (!sppDate) return null;
-
-    const match = /^(\d{4})\/(\d{2})\/(\d{2})$/.exec(sppDate.trim());
-    if (!match) {
-      console.log(`Unrecognized SPP date format: "${sppDate}"`);
-      return null;
-    }
-
-    const [, year, month, day] = match;
-    return `${year}-${month}-${day}T00:00:00Z`;
-  }
 
   // Pulls the column definitions for the document library backing this drive
   // and logs displayName -> name (the internal/backend name Graph expects
   // in the fields PATCH below). Handy for re-discovering internal names
   // (e.g. "Project_x0020_Status") without digging through Site Settings.
   async function logFolderColumnNames(token, driveId) {
-    const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
     const res = await fetch(`${GRAPH_BASE}/drives/${driveId}/list/columns`, {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -227,66 +246,10 @@ async function addMetadataToSharepointFolder(
     console.log(`Writable column names: ${JSON.stringify(columnMap)}`);
   }
 
-  async function updateFolderMetadata(token, driveId, itemId, columns) {
-    const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
-
-    const res = await fetch(
-      `${GRAPH_BASE}/drives/${driveId}/items/${itemId}/listItem/fields`,
-      {
-        method: "PATCH",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(columns),
-      },
-    );
-
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(
-        `Metadata update failed for item ${itemId}: ${JSON.stringify(data)}`,
-      );
-    }
-
-    console.log(
-      `Metadata updated for item ${itemId}: ${JSON.stringify(columns)}`,
-    );
-    return data;
-  }
-
   await logFolderColumnNames(token, driveId);
 
-  // Qual and Quant sites use different internal column names for the same
-  // logical fields, so the fields payload has to branch on division rather
-  // than being one shared mapping.
-  let columns;
-  if (division === "Qual") {
-    columns = {
-      ProjectManager: project.owner_name,
-      ProjectCoordinator: project.coordinator_name,
-      ProjectDate: project.start_date.substring(0, 10),
-      ProjectEndDate: project.trv_proj_End_Date__c.substring(0, 10),
-      AccountManager: project.proj_Sales_Rep__c,
-      ProjectStatus: project.proj_Project_Status__c,
-      Client: project.client_name,
-      /*FileLeafRef
-Clients*/
-    };
-  } else if (division === "Quant") {
-    columns = {
-      Project_x0020_Manager: project.owner_name,
-      Project_x0020_Coordinator: project.coordinator_name,
-      Project_x0020_Start_x0020_Date: project.start_date.substring(0, 10),
-      Project_x0020_End_x0020_Date: project.trv_proj_End_Date__c.substring(
-        0,
-        10,
-      ),
-      Account_x0020_Manager: project.proj_Sales_Rep__c,
-      Project_x0020_Status: project.proj_Project_Status__c,
-      Clients: project.client_name,
-    };
-  } else {
+  const columns = buildDivisionMetadataColumns(project, division);
+  if (!columns) {
     console.log(
       `Unrecognized division "${division}" — skipping metadata update for folder ${folderId}`,
     );
@@ -296,13 +259,87 @@ Clients*/
   await updateFolderMetadata(token, driveId, folderId, columns);
 }
 
-// Email project owner once creation is complete (maybe SPP action?)
-async function emailProjectOwner(project) {}
+// Emails the project owner once their SharePoint folders AND Team have been
+// created — called after both createFoldersInSharepoint and newSharepointTeam
+// have resolved for the project. Sends AS NOTIFICATION_FROM_MAILBOX (app-only
+// Mail.Send requires a real tenant mailbox as sender); recipient can be any
+// valid address, since project.owner_email comes straight from SPP.
+async function emailProjectOwner(project, token) {
+  const message = {
+    message: {
+      subject: `SharePoint site ready: ${project.name}`,
+      body: {
+        contentType: "Text",
+        content: `Hi,\n\nThe SharePoint folder structure and Team for "${project.name}" have been created and are ready to use.\n\nThanks,\nAutomation`,
+      },
+      toRecipients: [
+        { emailAddress: { address: project.owner_email } },
+        { emailAddress: { address: "rschein@topstepllc.com" } },
+      ],
+    },
+    saveToSentItems: true,
+  };
+
+  const res = await fetch(
+    `${GRAPH_BASE}/users/${encodeURIComponent(NOTIFICATION_FROM_MAILBOX)}/sendMail`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(message),
+    },
+  );
+
+  // sendMail returns 202 with an EMPTY body on success — only parse JSON
+  // on the error path, or res.json() will throw on the happy path.
+  if (res.status !== 202) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(
+      `Failed to send folder-ready email for "${project.name}" to ${project.owner_email}: ${JSON.stringify(data)}`,
+    );
+  }
+
+  console.log(
+    `Sent folder-ready email to ${project.owner_email} for "${project.name}"`,
+  );
+}
+
+// Writes the newly-created SharePoint folder ID and Team ID back to the
+// project's record in SPP. Call this once both createFoldersInSharepoint
+// and newSharepointTeam have resolved, so both IDs are available together.
+async function writeSharepointIdsToSpp(project, folderId, teamId, authObj) {
+  console.log(`WRITE--authObj: ${JSON.stringify(authObj)}`);
+  console.log(`WRITE--teamId: ${JSON.stringify(teamId)}`);
+  console.log(`WRITE--folderId: ${JSON.stringify(folderId)}`);
+  console.log(`WRITE--projectId: ${JSON.stringify(project.id)}`);
+  const projectSharepointIds = {
+    id: project.id,
+    proj_sharepoint_folder_id__c: folderId,
+    proj_sharepoint_team_id__c: teamId,
+  };
+
+  const projectUpdateDetails = {
+    authObj: authObj,
+    recordType: "Project",
+    writeObj: projectSharepointIds,
+  };
+
+  const projectUpdate = await callSharedUtil(
+    "tslib-putRecords",
+    projectUpdateDetails,
+  );
+
+  console.log(
+    `Wrote SharePoint IDs back to SPP for "${project.name}": folder=${folderId}, team=${teamId}`,
+  );
+
+  return projectUpdate;
+}
 
 // Create a Sharepoint Team Site for each NEW project (Loop A, Yes branch, second path, first action)
 async function newSharepointTeam(token, teamName, ownerId, description = "") {
-  const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
-
   const res = await fetch(`${GRAPH_BASE}/teams`, {
     method: "POST",
     headers: {
@@ -342,16 +379,12 @@ async function pollTeamCreation(
   maxAttempts = 30,
   delayMs = 5000,
 ) {
-  const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
   let lastStatus = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const res = await fetch(`${GRAPH_BASE}${operationUrl}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
-    console.log(
-      `res ${JSON.stringify(res)} concat ${GRAPH_BASE}${operationUrl}`,
-    );
     const data = await res.json();
     lastStatus = data.status;
     console.log(
@@ -407,95 +440,66 @@ async function getGraphToken() {
 
   return data.access_token;
 }
-const FALLBACK_OWNER_EMAIL = "unassigned.pm@trivoca.com";
 
-// Resolves an AAD user object id from an email/UPN. If upnOrEmail is
-// missing or doesn't resolve to a real user, falls back to a shared
-// "unassigned" mailbox so Team creation always has a valid owner rather
-// than failing outright on bad/missing project owner data.
 async function getUserId(token, upnOrEmail) {
-  const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
+  const res = await fetch(
+    `${GRAPH_BASE}/users/${encodeURIComponent(upnOrEmail)}?$select=id,displayName,userPrincipalName`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
 
-  async function lookupUser(email) {
-    const res = await fetch(
-      `${GRAPH_BASE}/users/${encodeURIComponent(email)}?$select=id,displayName,userPrincipalName`,
+  const data = await res.json();
+  if (!res.ok) {
+    /*throw new Error(
+      `Failed to resolve user "${upnOrEmail}": ${JSON.stringify(data)}`,
+    );*/
+    upnOrEmail = "unassigned.pm@trivoca.com";
+    const res2 = await fetch(
+      `${GRAPH_BASE}/users/${encodeURIComponent(upnOrEmail)}?$select=id,displayName,userPrincipalName`,
       {
         headers: { Authorization: `Bearer ${token}` },
       },
     );
-    const data = await res.json();
-    return { ok: res.ok, data };
-  }
-
-  if (!upnOrEmail) {
-    console.log(
-      `No owner_email provided, falling back to ${FALLBACK_OWNER_EMAIL}`,
-    );
+    const data2 = await res2.json();
+    console.log(`Resolved user: ${data2.userPrincipalName} -> id: ${data2.id}`);
+    return data2.id;
   } else {
-    const { ok, data } = await lookupUser(upnOrEmail);
-    if (ok) {
-      console.log(`Resolved user: ${data.userPrincipalName} -> id: ${data.id}`);
-      return data.id;
-    }
-    console.log(
-      `Failed to resolve user "${upnOrEmail}", falling back to ${FALLBACK_OWNER_EMAIL}: ${JSON.stringify(data)}`,
-    );
+    console.log(`Resolved user: ${data.userPrincipalName} -> id: ${data.id}`);
+    return data.id;
   }
-
-  const { ok, data } = await lookupUser(FALLBACK_OWNER_EMAIL);
-  if (!ok) {
-    throw new Error(
-      `Failed to resolve fallback user "${FALLBACK_OWNER_EMAIL}": ${JSON.stringify(data)}`,
-    );
-  }
-
-  console.log(
-    `Resolved fallback user: ${data.userPrincipalName} -> id: ${data.id}`,
-  );
-  return data.id;
 }
-// Emails the project owner once their SharePoint folders AND Team have been
-// created — call this last, after both createFoldersInSharepoint and
-// newSharepointTeam have resolved for the project. Sends AS a real mailbox
-// in the tenant (app-only Mail.Send requires this); recipient can be any
-// valid address, since project.owner_email comes straight from SPP.
-async function emailProjectOwner(project, token) {
-  const FROM_MAILBOX = "ryan.kroger@trivoca.com";
 
-  const message = {
-    message: {
-      subject: `SharePoint site ready: ${project.name}`,
-      body: {
-        contentType: "Text",
-        content: `Hi,\n\nThe SharePoint folder structure and Team for "${project.name}" have been created and are ready to use.\n\nThanks,\nAutomation`,
-      },
-      toRecipients: [{ emailAddress: { address: project.owner_email } }],
-    },
-    saveToSentItems: true,
-  };
+// Builds the division-specific metadata columns object for the folder PATCH.
+function buildDivisionMetadataColumns(project, division) {
+  const projectDate = project.start_date
+    ? project.start_date.substring(0, 10)
+    : null;
+  const projectEndDate = project.trv_proj_End_Date__c
+    ? project.trv_proj_End_Date__c.substring(0, 10)
+    : null;
 
-  const res = await fetch(
-    `${GRAPH_BASE}/users/${encodeURIComponent(FROM_MAILBOX)}/sendMail`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(message),
-    },
-  );
-
-  // sendMail returns 202 with an EMPTY body on success — only parse JSON
-  // on the error path, or res.json() will throw on the happy path.
-  if (res.status !== 202) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(
-      `Failed to send folder-ready email for "${project.name}" to ${project.owner_email}: ${JSON.stringify(data)}`,
-    );
+  if (division === "Qual") {
+    return {
+      ProjectManager: project.owner_name,
+      ProjectCoordinator: project.coordinator_name,
+      ProjectDate: projectDate,
+      ProjectEndDate: projectEndDate,
+      AccountManager: project.proj_Sales_Rep__c,
+      ProjectStatus: project.proj_Project_Status__c,
+      Client: project.client_name,
+    };
   }
-
-  console.log(
-    `Sent folder-ready email to ${project.owner_email} for "${project.name}"`,
-  );
+  if (division === "Quant") {
+    return {
+      Project_x0020_Manager: project.owner_name,
+      Project_x0020_Coordinator: project.coordinator_name,
+      Project_x0020_Start_x0020_Date: projectDate,
+      Project_x0020_End_x0020_Date: projectEndDate,
+      Account_x0020_Manager: project.proj_Sales_Rep__c,
+      Project_x0020_Status: project.proj_Project_Status__c,
+      Clients: project.client_name,
+    };
+  }
+  return null;
 }

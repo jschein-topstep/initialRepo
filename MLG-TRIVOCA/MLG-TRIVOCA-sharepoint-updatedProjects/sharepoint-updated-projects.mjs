@@ -265,23 +265,29 @@ async function removeTeamOwner(token, teamId, userId) {
 // site entirely — that should go through a dedicated move/recreate flow rather
 // than a rename.
 //
-// Expected fields on `project`, on top of the normal create payload:
-//   - team_id              : the Team/Group id captured when the project was first provisioned.
-//                            Without this the folder still gets renamed/updated, but the
-//                            Team update is skipped.
-//   - previous_name        : the folder/team name on file before this update. Only needed
-//                            when the name changed — used to find the existing folder before
-//                            it's renamed. If omitted, lookup falls back to the current name.
-//   - previous_owner_email : needed to know who to remove as Team owner when ownership changes.
+// Skips entirely (no-op, no API calls) if proj_sharepoint_folder_id__c is not
+// yet populated on the project — that means the create-path Lambda hasn't run
+// (or hasn't finished writing the ID back to SPP) yet, so there's no existing
+// folder to update. This prevents a brand-new project from triggering both a
+// create AND an update pass in the same SPP sync run.
 async function updateSharepointForProject(project, token) {
   try {
+    if (!project.proj_sharepoint_folder_id__c) {
+      console.log(
+        `No proj_sharepoint_folder_id__c on project "${project.name}" — folder likely hasn't been created (or synced back to SPP) yet. Skipping update.`,
+      );
+      return {
+        project: project.name,
+        updated: false,
+        reason: "no-folder-id-yet",
+      };
+    }
+
     const { siteId, driveId } = await resolveSiteAndDrive(
       token,
       project.proj_Division__c,
     );
 
-    // NEW: log the raw field values coming in from SPP before anything
-    // touches them, so you can see exactly what you're working with.
     console.log(
       `Incoming project fields for "${project.name}": ${JSON.stringify({
         proj_Division__c: project.proj_Division__c,
@@ -323,8 +329,6 @@ async function updateSharepointForProject(project, token) {
       );
     }
 
-    // NEW: log exactly what's about to be sent, BEFORE the request,
-    // so a thrown error downstream doesn't hide this.
     console.log(
       `Attempting PATCH for "${project.name}" with columns: ${JSON.stringify(metadataColumns)}`,
     );
@@ -333,9 +337,6 @@ async function updateSharepointForProject(project, token) {
       ...(metadataColumns || {}),
     });
 
-    // NEW: log what Graph actually echoes back, not just what you sent —
-    // confirms whether values were actually accepted, not just whether
-    // the request returned 200.
     console.log(
       `Graph response fields for "${project.name}": ${JSON.stringify(patchResult)}`,
     );
@@ -344,8 +345,6 @@ async function updateSharepointForProject(project, token) {
 
     return { project: project.name, updated: true };
   } catch (err) {
-    // NEW: log the stack, not just the message, so you can see exactly
-    // which line threw (e.g. a .substring on undefined).
     console.log(
       `Update failed for project "${project.name}": ${err.message}\n${err.stack}`,
     );

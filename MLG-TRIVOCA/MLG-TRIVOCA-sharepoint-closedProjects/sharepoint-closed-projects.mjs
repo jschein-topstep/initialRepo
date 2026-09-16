@@ -27,15 +27,32 @@ export const handler = async (event) => {
   await Promise.all(
     bodyJSON.projects.map(async (project) => {
       const ownerId = await getUserId(token, "anthony.flores@trivoca.com");
+      console.log(`Inactivation date: ${project.proj_inactivation_date__c}`);
+      if (project.proj_inactivation_date__c != "0000-00-00") {
+        const ninetyDayMilliseconds = 90 * 24 * 60 * 60 * 1000;
+        const inactivationDate = new Date(project.proj_inactivation_date__c);
+        const now = new Date();
+        console.log(`ninetyDayMilliseconds: ${ninetyDayMilliseconds}`);
+        console.log(`now: ${now}`);
+        if (now - inactivationDate > ninetyDayMilliseconds) {
+          console.log(
+            `Project "${project.name}" is inactive for more than 90 days — proceeding with closure.`,
+          );
+          //return { project: project.name, updated: false, reason: "inactive" };
 
-      if (project.proj_Division__c === "Qual" && project.active != 1) {
-        console.log(`QUAL project: ${project.name}`);
-        await deleteClientListSubfolder(project, token);
-      } else if (project.proj_Division__c === "Quant" && project.active != 1) {
-        console.log(`QUANT project: ${project.name}`);
-        await deleteClientListSubfolder(project, token);
-      } else {
-        console.log(`No QUAL or QUANT projects found`);
+          if (project.proj_Division__c === "Qual" && project.active != 1) {
+            console.log(`QUAL project: ${project.name}`);
+            await deleteClientListSubfolder(project, token);
+          } else if (
+            project.proj_Division__c === "Quant" &&
+            project.active != 1
+          ) {
+            console.log(`QUANT project: ${project.name}`);
+            await deleteClientListSubfolder(project, token);
+          } else {
+            console.log(`No QUAL or QUANT projects found`);
+          }
+        }
       }
     }),
   );

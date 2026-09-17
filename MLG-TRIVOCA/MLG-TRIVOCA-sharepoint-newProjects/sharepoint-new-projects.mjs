@@ -44,8 +44,17 @@ export const handler = async (event) => {
 
   await Promise.all(
     bodyJSON.projects.map(async (project) => {
-      const ownerId = await getUserId(token, project.owner_email); // email of the proj owner
-      const teamId = await newSharepointTeam(token, project.name, ownerId);
+      let teamId = project.proj_sharepoint_team_id__c;
+
+      if (teamId) {
+        console.log(
+          `Project "${project.name}" already has a Team (id=${teamId}) — skipping Team creation`,
+        );
+      } else {
+        const ownerId = await getUserId(token, project.owner_email);
+        teamId = await newSharepointTeam(token, project.name, ownerId);
+      }
+
       const projectFolder = await createFoldersInSharepoint(project, token);
 
       await writeSharepointIdsToSpp(project, projectFolder.id, teamId, authObj);
@@ -441,33 +450,48 @@ async function getGraphToken() {
   return data.access_token;
 }
 
+const FALLBACK_OWNER_EMAIL = "unassigned.pm@trivoca.com";
+
+// Resolves a user's AAD object id for the given email. Falls back to
+// FALLBACK_OWNER_EMAIL if the original lookup fails or doesn't return a
+// usable id. Only throws if the fallback lookup ALSO fails, since at that
+// point there's no owner left to assign.
 async function getUserId(token, upnOrEmail) {
-  const res = await fetch(
-    `${GRAPH_BASE}/users/${encodeURIComponent(upnOrEmail)}?$select=id,displayName,userPrincipalName`,
-    {
-      headers: { Authorization: `Bearer ${token}` },
-    },
+  async function lookupUser(email) {
+    const res = await fetch(
+      `${GRAPH_BASE}/users/${encodeURIComponent(email)}?$select=id,displayName,userPrincipalName`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    const data = await res.json();
+    if (!res.ok || !data.id) return null;
+    return data;
+  }
+
+  const primary = await lookupUser(upnOrEmail);
+  if (primary) {
+    console.log(
+      `Resolved user: ${primary.userPrincipalName} -> id: ${primary.id}`,
+    );
+    return primary.id;
+  }
+
+  console.log(
+    `Could not resolve user "${upnOrEmail}", falling back to ${FALLBACK_OWNER_EMAIL}`,
   );
 
-  const data = await res.json();
-  if (!res.ok) {
-    /*throw new Error(
-      `Failed to resolve user "${upnOrEmail}": ${JSON.stringify(data)}`,
-    );*/
-    upnOrEmail = "unassigned.pm@trivoca.com";
-    const res2 = await fetch(
-      `${GRAPH_BASE}/users/${encodeURIComponent(upnOrEmail)}?$select=id,displayName,userPrincipalName`,
-      {
-        headers: { Authorization: `Bearer ${token}` },
-      },
+  const fallback = await lookupUser(FALLBACK_OWNER_EMAIL);
+  if (fallback) {
+    console.log(
+      `Resolved fallback user: ${fallback.userPrincipalName} -> id: ${fallback.id}`,
     );
-    const data2 = await res2.json();
-    console.log(`Resolved user: ${data2.userPrincipalName} -> id: ${data2.id}`);
-    return data2.id;
-  } else {
-    console.log(`Resolved user: ${data.userPrincipalName} -> id: ${data.id}`);
-    return data.id;
+    return fallback.id;
   }
+
+  // Both lookups failed — nothing usable to return, and passing undefined
+  // downstream just produces a confusing Graph error later, so fail loudly here.
+  throw new Error(
+    `Failed to resolve both primary user "${upnOrEmail}" and fallback "${FALLBACK_OWNER_EMAIL}"`,
+  );
 }
 
 // Builds the division-specific metadata columns object for the folder PATCH.

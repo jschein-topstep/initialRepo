@@ -54,7 +54,7 @@ export const handler = async (event = {}) => {
     process.env.DEFAULT_SUBSIDIARY ||
     "Impetus"
   ).toLowerCase();
-
+  subsidiaryKey = "impetus";
   const config = SUBSIDIARIES[subsidiaryKey];
   if (!config) {
     throw new Error(

@@ -3,24 +3,86 @@ import chromiumAws from "@sparticuz/chromium";
 import stealth from "puppeteer-extra-plugin-stealth";
 chromium.use(stealth());
 
-// AWS Lambda entry point
-export const handler = async () => {
-  // Start headless Chromium using the Lambda-compatible Chromium binary
-  const isLambda = !!process.env.AWS_LAMBDA_FUNCTION_NAME;
+// ---------------------------------------------------------------------------
+// Shared company ID — all subsidiaries log into the same SPP company/instance,
+// so this lives in one place instead of being repeated per subsidiary.
+// ---------------------------------------------------------------------------
+const OA_COMPANY_ID = process.env.OA_COMPANY_ID;
 
-  const browser = await chromium.launch(
-    isLambda
-      ? {
-          args: chromiumAws.args,
-          executablePath: await chromiumAws.executablePath(),
-          headless: true,
-        }
-      : { headless: false }, // local headless, to keep testing against Akamai
-  );
+// ---------------------------------------------------------------------------
+// Per-subsidiary configuration. Add a new subsidiary here and it's available
+// to the handler immediately — no other code changes needed.
+//
+// Set env vars in Lambda like:
+//   TRIVOCA_OA_USER_ID / TRIVOCA_OA_PASSWORD
+//   IMPETUS_OA_USER_ID / IMPETUS_OA_PASSWORD
+// ---------------------------------------------------------------------------
+const SUBSIDIARIES = {
+  trivoca: {
+    label: "TriVoca",
+    userId: process.env.TRIVOCA_OA_USER_ID,
+    password: process.env.TRIVOCA_OA_PASSWORD,
+  },
+  impetus: {
+    label: "Impetus",
+    userId: process.env.IMPETUS_OA_USER_ID,
+    password: process.env.IMPETUS_OA_PASSWORD,
+  },
+};
 
-  const baseUrl = isLambda
-    ? process.env.BASE_URL
-    : "https://mlg-sb.app.sandbox.netsuitesuiteprojectspro.com";
+// AWS Lambda entry point.
+// Invoked via a Lambda Function URL, so the SPP script's POST body arrives
+// as a raw JSON string in event.body (not as top-level event properties) —
+// same shape as API Gateway's payload format 2.0. We parse it here to get
+// the subsidiary the caller asked for (e.g. {"subsidiary":"TriVoca"}).
+// Falls back to DEFAULT_SUBSIDIARY env var, then "trivoca", so manual
+// test invocations without a body still work.
+export const handler = async (event = {}) => {
+  let requestBody = {};
+  if (event.body) {
+    try {
+      requestBody =
+        typeof event.body === "string" ? JSON.parse(event.body) : event.body;
+    } catch (err) {
+      console.error("Could not parse request body as JSON:", event.body);
+    }
+  }
+
+  const subsidiaryKey = (
+    requestBody.subsidiary ||
+    event.subsidiary || // still supported for direct/manual invocation in the Lambda console
+    process.env.DEFAULT_SUBSIDIARY ||
+    "trivoca"
+  ).toLowerCase();
+
+  const config = SUBSIDIARIES[subsidiaryKey];
+  if (!config) {
+    throw new Error(
+      `Unknown subsidiary "${subsidiaryKey}". Valid options: ${Object.keys(SUBSIDIARIES).join(", ")}`,
+    );
+  }
+
+  const creds = {
+    companyId: OA_COMPANY_ID,
+    userId: config.userId,
+    password: config.password,
+  };
+
+  if (!creds.companyId || !creds.userId || !creds.password) {
+    throw new Error(
+      `Missing credentials for subsidiary "${subsidiaryKey}" — check OA_COMPANY_ID and the ${config.label.toUpperCase()}_OA_* env vars`,
+    );
+  }
+
+  console.log(`Running invoice baseline for subsidiary: ${config.label}`);
+
+  const browser = await chromium.launch({
+    args: chromiumAws.args,
+    executablePath: await chromiumAws.executablePath(),
+    headless: true,
+  });
+
+  const baseUrl = process.env.BASE_URL;
   const page = await browser.newPage();
 
   // Open SuiteProjects login page --
@@ -45,18 +107,11 @@ export const handler = async () => {
   // also grab a chunk of HTML so we can see the structure if inputs is still empty
   const html = await page.content();
   //console.log("HTML SNIPPET:", html.slice(0, 2500));
-  // or write to /tmp and pull it, or log the full b64 and paste it back
 
-  // Fill login form from Lambda environment variables
-  if (isLambda) {
-    await page.fill('input[name="companyID"]', process.env.OA_COMPANY_ID);
-    await page.fill('input[name="userID"]', process.env.OA_USER_ID);
-    await page.fill('input[name="password"]', process.env.OA_PASSWORD);
-  } else {
-    await page.fill('input[name="companyID"]', "MLG SB");
-    await page.fill('input[name="userID"]', "medlearning@topstepllc.com");
-    await page.fill('input[name="password"]', "Spr1ng2026!");
-  }
+  // Fill login form using this subsidiary's identity
+  await page.fill('input[name="companyID"]', creds.companyId);
+  await page.fill('input[name="userID"]', creds.userId);
+  await page.fill('input[name="password"]', creds.password);
 
   // Submit login form and wait for redirect into SuiteProjects
   await Promise.all([
@@ -148,14 +203,16 @@ export const handler = async () => {
 
   await browser.close();
 
-  // Return debugging/confirmation data to Lambda test output
+  // Return a Function URL-shaped response so the SPP script's https.post
+  // gets a predictable statusCode + JSON body to parse.
   return {
-    //baselineEditUrl,
-    finalUrl: page.url(),
-    //likelySaved:
-    //  resultHtml.includes("baseline") &&
-    //  !resultHtml.includes("Create a new baseline"),
-    snippet: resultHtml.substring(0, 2000),
+    statusCode: 200,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      subsidiary: config.label,
+      finalUrl: page.url(),
+      snippet: resultHtml.substring(0, 2000),
+    }),
   };
 };
 
@@ -168,8 +225,6 @@ function extractUid(url) {
 // Recursively search a SuiteProjects menu JSON for an item matching a path of
 // names, returning its URL. Each element of `path` must match a name as you
 // descend; only the final name's URL is returned.
-// e.g. findUrlByPath(data, ["invoices", "all"]) -> the Invoices "All" url,
-//      not the Charges/slips "all" url.
 function findUrlByPath(list, path) {
   const items = Array.isArray(list) ? list : list?.data;
   if (!items || !path.length) return null;
@@ -192,10 +247,4 @@ function findUrlByPath(list, path) {
   }
 
   return null;
-}
-
-if (!process.env.AWS_LAMBDA_FUNCTION_NAME) {
-  handler()
-    .then((r) => console.log(r))
-    .catch((e) => console.error(e));
 }

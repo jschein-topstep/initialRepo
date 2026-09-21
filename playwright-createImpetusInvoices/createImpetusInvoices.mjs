@@ -52,7 +52,7 @@ export const handler = async (event = {}) => {
     requestBody.subsidiary ||
     event.subsidiary || // still supported for direct/manual invocation in the Lambda console
     process.env.DEFAULT_SUBSIDIARY ||
-    "trivoca"
+    "Impetus"
   ).toLowerCase();
 
   const config = SUBSIDIARIES[subsidiaryKey];

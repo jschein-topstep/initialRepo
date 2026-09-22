@@ -18,11 +18,11 @@ const OA_COMPANY_ID = process.env.OA_COMPANY_ID;
 //   IMPETUS_OA_USER_ID / IMPETUS_OA_PASSWORD
 // ---------------------------------------------------------------------------
 const SUBSIDIARIES = {
-  trivoca: {
+  /*trivoca: {
     label: "TriVoca",
     userId: process.env.TRIVOCA_OA_USER_ID,
     password: process.env.TRIVOCA_OA_PASSWORD,
-  },
+  },*/
   impetus: {
     label: "Impetus",
     userId: process.env.IMPETUS_OA_USER_ID,
@@ -52,22 +52,22 @@ export const handler = async (event = {}) => {
     requestBody.subsidiary ||
     event.subsidiary || // still supported for direct/manual invocation in the Lambda console
     process.env.DEFAULT_SUBSIDIARY ||
-    "trivoca"
+    "impetus"
   ).toLowerCase();
-
+  subsidiaryKey = "impetus";
   const config = SUBSIDIARIES[subsidiaryKey];
   if (!config) {
     throw new Error(
       `Unknown subsidiary "${subsidiaryKey}". Valid options: ${Object.keys(SUBSIDIARIES).join(", ")}`,
     );
   }
-
+  console.log("config:", JSON.stringify(config));
   const creds = {
     companyId: OA_COMPANY_ID,
     userId: config.userId,
     password: config.password,
   };
-
+  console.log("creds:", JSON.stringify(creds));
   if (!creds.companyId || !creds.userId || !creds.password) {
     throw new Error(
       `Missing credentials for subsidiary "${subsidiaryKey}" — check OA_COMPANY_ID and the ${config.label.toUpperCase()}_OA_* env vars`,

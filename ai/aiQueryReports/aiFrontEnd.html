@@ -14,7 +14,7 @@
         --text-muted: #9a9a95;
         --surface-0: #f4f3ef;
         --surface-1: #ffffff;
-        --accent: #2f5d50;
+        --accent: #162035;
         --accent-fg: #ffffff;
         --user-bubble: #eef1ee;
         --radius: 10px;
@@ -119,7 +119,9 @@
         border-top: 1px solid var(--border);
       }
 
-      #terminologyButton {
+      #terminologyButton,
+      #downloadButton,
+      #changePasswordButton {
         width: 100%;
         background: none;
         color: var(--text-secondary);
@@ -131,9 +133,96 @@
         height: auto;
       }
 
-      #terminologyButton:hover {
+      #terminologyButton:hover,
+      #downloadButton:hover,
+      #changePasswordButton:hover {
         background: var(--surface-0);
         color: var(--text-primary);
+      }
+
+      #downloadButton,
+      #changePasswordButton {
+        margin-top: 8px;
+      }
+
+      #loginOverlay {
+        position: fixed;
+        inset: 0;
+        background: var(--surface-0);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 100;
+      }
+
+      #loginOverlay.hidden {
+        display: none;
+      }
+
+      #loginPanel {
+        background: var(--surface-1);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        width: 340px;
+        max-width: 90vw;
+        padding: 28px 24px;
+      }
+
+      #loginPanel h2 {
+        margin: 0 0 4px;
+        font-size: 17px;
+        font-weight: 600;
+      }
+
+      #loginPanel p {
+        margin: 0 0 18px;
+        font-size: 13px;
+        color: var(--text-secondary);
+      }
+
+      #loginPanel label {
+        display: block;
+        font-size: 12.5px;
+        color: var(--text-secondary);
+        margin-bottom: 4px;
+      }
+
+      #loginPanel input {
+        width: 100%;
+        padding: 9px 10px;
+        font-size: 14px;
+        font-family: inherit;
+        border: 1px solid var(--border-strong);
+        border-radius: var(--radius);
+        background: var(--surface-1);
+        color: var(--text-primary);
+        box-sizing: border-box;
+        margin-bottom: 14px;
+      }
+
+      #loginSubmit {
+        width: 100%;
+        background: var(--accent);
+        color: var(--accent-fg);
+        border: none;
+        border-radius: var(--radius);
+        padding: 10px 12px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        height: auto;
+      }
+
+      #loginSubmit:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
+
+      #loginStatus {
+        font-size: 12.5px;
+        color: #a5402a;
+        min-height: 16px;
+        margin-top: 10px;
       }
 
       .modal-overlay {
@@ -315,6 +404,10 @@
         border-bottom: 1px solid var(--border);
         background: var(--surface-1);
         flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
       }
 
       header h1 {
@@ -329,11 +422,16 @@
         color: var(--text-secondary);
       }
 
+      #headerLogo {
+        height: 40px;
+        width: auto;
+        flex-shrink: 0;
+      }
+
       #chatWindow {
         flex: 1;
         overflow-y: auto;
         padding: 24px;
-        max-width: 760px;
         width: 100%;
         margin: 0 auto;
       }
@@ -347,6 +445,9 @@
 
       .turn {
         margin-bottom: 20px;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
       }
 
       .bubble {
@@ -361,15 +462,14 @@
 
       .bubble-question {
         background: var(--user-bubble);
-        margin-left: auto;
-        border-bottom-right-radius: 3px;
+        border-bottom-left-radius: 3px;
       }
 
       .bubble-answer {
         background: var(--surface-1);
         border: 1px solid var(--border);
-        margin-right: auto;
         border-bottom-left-radius: 3px;
+        max-width: 95%;
       }
 
       .bubble-answer.pending {
@@ -382,8 +482,81 @@
         color: #a5402a;
       }
 
-      .row {
-        display: flex;
+      .bubble-markdown {
+        white-space: normal;
+      }
+
+      .bubble-markdown p {
+        margin: 0 0 0.6em;
+      }
+
+      .bubble-markdown p:last-child {
+        margin-bottom: 0;
+      }
+
+      .bubble-markdown table {
+        border-collapse: collapse;
+        margin: 0.6em 0;
+        font-size: 14px;
+        display: block;
+        overflow-x: auto;
+      }
+
+      .bubble-markdown th,
+      .bubble-markdown td {
+        border: 1px solid var(--border);
+        padding: 6px 10px;
+        text-align: left;
+      }
+
+      .bubble-markdown th {
+        background: var(--surface-0);
+        font-weight: 600;
+      }
+
+      .bubble-markdown ul,
+      .bubble-markdown ol {
+        margin: 0.4em 0;
+        padding-left: 1.4em;
+      }
+
+      .bubble-markdown li {
+        margin-bottom: 0.2em;
+      }
+
+      .bubble-markdown code {
+        background: var(--surface-0);
+        padding: 1px 5px;
+        border-radius: 4px;
+        font-family: "Courier New", Courier, monospace;
+        font-size: 0.9em;
+      }
+
+      .bubble-markdown pre {
+        background: var(--surface-0);
+        padding: 10px;
+        border-radius: 6px;
+        overflow-x: auto;
+      }
+
+      .bubble-markdown pre code {
+        background: none;
+        padding: 0;
+      }
+
+      .bubble-markdown blockquote {
+        margin: 0.4em 0;
+        padding-left: 10px;
+        border-left: 3px solid var(--border-strong);
+        color: var(--text-secondary);
+      }
+
+      .bubble-markdown a {
+        color: var(--accent);
+      }
+
+      .bubble-markdown strong {
+        font-weight: 600;
       }
 
       footer {
@@ -394,7 +567,6 @@
       }
 
       #inputRow {
-        max-width: 760px;
         margin: 0 auto;
         display: flex;
         gap: 10px;
@@ -438,15 +610,45 @@
       }
 
       #hint {
-        max-width: 760px;
         margin: 6px auto 0;
         font-size: 12px;
         color: var(--text-muted);
+      }
+
+      .timestamp {
+        margin-top: 4px;
+        padding: 0 2px;
+        font-size: 12px;
+        font-style: italic;
+        color: var(--text-muted);
+        line-height: 1.4;
       }
     </style>
   </head>
 
   <body>
+    <div id="loginOverlay">
+      <div id="loginPanel">
+        <h2>Sign in</h2>
+        <p>Enter your username and password to continue.</p>
+        <form id="loginForm">
+          <label for="loginUsername">Username</label>
+          <input
+            type="text"
+            id="loginUsername"
+            autocomplete="username"
+            autofocus />
+          <label for="loginPassword">Password</label>
+          <input
+            type="password"
+            id="loginPassword"
+            autocomplete="current-password" />
+          <button type="submit" id="loginSubmit">Sign in</button>
+        </form>
+        <div id="loginStatus"></div>
+      </div>
+    </div>
+
     <div id="sidebar">
       <div id="sidebarHeader">
         <button id="newThreadButton">+ New chat</button>
@@ -454,6 +656,47 @@
       <div id="threadList"></div>
       <div id="sidebarFooter">
         <button id="terminologyButton">Terminology</button>
+        <button id="downloadButton">Download this chat</button>
+        <button id="changePasswordButton">Change password</button>
+      </div>
+    </div>
+
+    <div class="modal-overlay hidden" id="changePasswordModal">
+      <div class="modal-panel">
+        <div class="modal-header">
+          <div>
+            <h2>Change password</h2>
+            <p>Signed in as <span id="changePasswordUsername"></span>.</p>
+          </div>
+          <button class="modal-close" id="changePasswordClose">&times;</button>
+        </div>
+        <div class="term-form">
+          <input
+            type="password"
+            id="currentPasswordInput"
+            autocomplete="current-password"
+            placeholder="Current password" />
+          <input
+            type="password"
+            id="newPasswordInput"
+            autocomplete="new-password"
+            placeholder="New password" />
+          <input
+            type="password"
+            id="confirmPasswordInput"
+            autocomplete="new-password"
+            placeholder="Confirm new password" />
+          <div class="term-form-status" id="changePasswordStatus"></div>
+          <div class="term-form-row">
+            <button
+              type="button"
+              class="term-form-cancel"
+              id="changePasswordCancel">
+              Cancel
+            </button>
+            <button type="button" id="changePasswordSave">Save password</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -488,11 +731,14 @@
 
     <div id="main">
       <header>
-        <h1>Ask a question</h1>
-        <p>
-          Ask about your SuiteProjects Pro data. Follow-up questions are
-          welcome.
-        </p>
+        <div>
+          <h1>Ask a question</h1>
+          <p>
+            Ask about your SuiteProjects Pro data. Follow-up questions are
+            welcome.
+          </p>
+        </div>
+        <img id="headerLogo" src="topstep_logo.jpg" alt="" />
       </header>
 
       <div id="chatWindow">
@@ -513,9 +759,74 @@
       </footer>
     </div>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
     <script>
       const lambdaUrl =
         "https://bsblugut2ka2fwqmhluv63pvxm0ybuid.lambda-url.us-east-2.on.aws/";
+
+      // Page gate: requires signing in again every time the tab is closed
+      // (sessionStorage, not localStorage). This is a UI-level gate only --
+      // it does not restrict the Lambda Function URL itself, which remains
+      // reachable by anyone who has it regardless of login state.
+      const AUTH_KEY = "spp-chat-authed";
+      const AUTH_USERNAME_KEY = "spp-chat-username";
+
+      const loginOverlay = document.getElementById("loginOverlay");
+      const loginForm = document.getElementById("loginForm");
+      const loginUsername = document.getElementById("loginUsername");
+      const loginPassword = document.getElementById("loginPassword");
+      const loginSubmit = document.getElementById("loginSubmit");
+      const loginStatus = document.getElementById("loginStatus");
+
+      if (sessionStorage.getItem(AUTH_KEY) === "1") {
+        loginOverlay.classList.add("hidden");
+      }
+
+      loginForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+
+        const username = loginUsername.value.trim();
+        const password = loginPassword.value;
+
+        if (!username || !password) {
+          loginStatus.textContent = "Username and password are both required.";
+          return;
+        }
+
+        loginSubmit.disabled = true;
+        loginStatus.textContent = "Signing in...";
+
+        try {
+          const response = await fetch(lambdaUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "login", username, password }),
+          });
+
+          const data = await readJson(response);
+
+          if (!response.ok) {
+            throw new Error(data.error || "Invalid username or password");
+          }
+
+          sessionStorage.setItem(AUTH_KEY, "1");
+          sessionStorage.setItem(AUTH_USERNAME_KEY, username);
+          loginOverlay.classList.add("hidden");
+        } catch (error) {
+          loginStatus.textContent = error.message;
+          loginPassword.value = "";
+          loginPassword.focus();
+        } finally {
+          loginSubmit.disabled = false;
+        }
+      });
+
+      // The asker's real timezone (e.g. "America/Chicago"), used server-side
+      // to tell the agent what "today" actually is for that specific
+      // person -- more accurate than any single fixed timezone, since
+      // different users may be in different regions.
+      const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
       const THREADS_KEY = "spp-chat-threads";
       const MAX_TITLE_LENGTH = 42;
@@ -527,6 +838,7 @@
       const newThreadButton = document.getElementById("newThreadButton");
 
       const terminologyButton = document.getElementById("terminologyButton");
+      const downloadButton = document.getElementById("downloadButton");
       const terminologyModal = document.getElementById("terminologyModal");
       const terminologyClose = document.getElementById("terminologyClose");
       const termList = document.getElementById("termList");
@@ -536,15 +848,51 @@
       const termFormSave = document.getElementById("termFormSave");
       const termFormCancel = document.getElementById("termFormCancel");
 
+      const changePasswordButton = document.getElementById(
+        "changePasswordButton",
+      );
+      const changePasswordModal = document.getElementById(
+        "changePasswordModal",
+      );
+      const changePasswordClose = document.getElementById(
+        "changePasswordClose",
+      );
+      const changePasswordUsername = document.getElementById(
+        "changePasswordUsername",
+      );
+      const currentPasswordInput = document.getElementById(
+        "currentPasswordInput",
+      );
+      const newPasswordInput = document.getElementById("newPasswordInput");
+      const confirmPasswordInput = document.getElementById(
+        "confirmPasswordInput",
+      );
+      const changePasswordStatus = document.getElementById(
+        "changePasswordStatus",
+      );
+      const changePasswordSave = document.getElementById("changePasswordSave");
+      const changePasswordCancel = document.getElementById(
+        "changePasswordCancel",
+      );
+
       let editingTerm = null; // original term name being edited, or null for a new one
 
       terminologyButton.addEventListener("click", openTerminologyModal);
+      downloadButton.addEventListener("click", downloadActiveThread);
       terminologyClose.addEventListener("click", closeTerminologyModal);
       terminologyModal.addEventListener("click", (event) => {
         if (event.target === terminologyModal) closeTerminologyModal();
       });
       termFormCancel.addEventListener("click", resetTermForm);
       termFormSave.addEventListener("click", handleSaveTerm);
+
+      changePasswordButton.addEventListener("click", openChangePasswordModal);
+      changePasswordClose.addEventListener("click", closeChangePasswordModal);
+      changePasswordCancel.addEventListener("click", closeChangePasswordModal);
+      changePasswordModal.addEventListener("click", (event) => {
+        if (event.target === changePasswordModal) closeChangePasswordModal();
+      });
+      changePasswordSave.addEventListener("click", handleChangePassword);
 
       let threads = loadThreads();
       let activeThreadId = threads.length > 0 ? threads[0].sessionId : null;
@@ -572,6 +920,40 @@
         questionElement.style.height = `${Math.min(questionElement.scrollHeight, 160)}px`;
       });
 
+      // How many total attempts to make before actually showing the user an
+      // error. Guards against ordinary transient failures (a network blip,
+      // a momentary Lambda/API hiccup) -- retrying silently has a real
+      // chance of working without bothering the user with an error that has
+      // nothing to do with their actual question.
+      const MAX_QUESTION_ATTEMPTS = 3;
+
+      // One attempt: submit the question, poll for the result, return the
+      // answer or throw. No retry logic in here -- that lives in the
+      // caller, so this stays simple and reusable.
+      async function attemptQuestion(question, sessionId, answerBubble) {
+        const response = await fetch(lambdaUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "submit",
+            question,
+            sessionId,
+            timezone: userTimezone,
+          }),
+        });
+
+        const data = await readJson(response);
+
+        if (!response.ok) {
+          throw new Error(data.error || `HTTP ${response.status}`);
+        }
+        if (!data.requestId) {
+          throw new Error("Lambda did not return a requestId.");
+        }
+
+        return await pollForAnswer(data.requestId, answerBubble);
+      }
+
       async function submitQuestion() {
         const question = questionElement.value.trim();
         if (!question) return;
@@ -587,8 +969,9 @@
         const currentEmptyState = document.getElementById("emptyState");
         if (currentEmptyState) currentEmptyState.remove();
 
-        addBubble("question", question);
-        const answerBubble = addBubble("answer pending", "Working...");
+        const askedAt = Date.now();
+        addBubble("question", question, askedAt);
+        const answerBubble = addBubble("answer pending", "Working...", askedAt);
 
         questionElement.value = "";
         questionElement.style.height = "auto";
@@ -598,7 +981,7 @@
         // Reserve the turn now so a page reload mid-request doesn't lose the
         // question, then fill in the answer (or an error) once we have it.
         const turnIndex = thread.messages.length;
-        thread.messages.push({ question, answer: null });
+        thread.messages.push({ question, answer: null, askedAt });
         if (thread.messages.length === 1) {
           thread.title =
             question.slice(0, MAX_TITLE_LENGTH) +
@@ -607,39 +990,55 @@
         saveThreads();
         renderThreadList();
 
-        try {
-          const response = await fetch(lambdaUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              action: "submit",
+        let lastError = null;
+
+        for (let attempt = 1; attempt <= MAX_QUESTION_ATTEMPTS; attempt++) {
+          try {
+            if (attempt > 1) {
+              // Quietly retry rather than alarm the user -- most of the
+              // time this resolves within a try or two.
+              answerBubble.classList.remove("error");
+              answerBubble.classList.add("pending");
+              answerBubble.textContent = "Working...";
+            }
+
+            const { answer, answeredAt } = await attemptQuestion(
               question,
-              sessionId: thread.sessionId,
-            }),
-          });
-
-          const data = await readJson(response);
-
-          if (!response.ok) {
-            throw new Error(data.error || `HTTP ${response.status}`);
+              thread.sessionId,
+              answerBubble,
+            );
+            thread.messages[turnIndex].answer = answer;
+            thread.messages[turnIndex].answeredAt = answeredAt;
+            saveThreads();
+            lastError = null;
+            break;
+          } catch (error) {
+            lastError = error;
+            // Fall through to the next attempt, if any remain.
           }
-          if (!data.requestId) {
-            throw new Error("Lambda did not return a requestId.");
-          }
-
-          const answer = await pollForAnswer(data.requestId, answerBubble);
-          thread.messages[turnIndex].answer = answer;
-          saveThreads();
-        } catch (error) {
-          setBubbleError(answerBubble, `Error: ${error.message}`);
-          thread.messages[turnIndex].answer = `Error: ${error.message}`;
-          thread.messages[turnIndex].isError = true;
-          saveThreads();
-        } finally {
-          questionElement.disabled = false;
-          submitButton.disabled = false;
-          questionElement.focus();
         }
+
+        if (lastError) {
+          const answeredAt = Date.now();
+          const attemptsNote =
+            MAX_QUESTION_ATTEMPTS > 1
+              ? ` (tried ${MAX_QUESTION_ATTEMPTS} times)`
+              : "";
+          setBubbleError(
+            answerBubble,
+            `Error: ${lastError.message}${attemptsNote}`,
+            answeredAt,
+          );
+          thread.messages[turnIndex].answer =
+            `Error: ${lastError.message}${attemptsNote}`;
+          thread.messages[turnIndex].isError = true;
+          thread.messages[turnIndex].answeredAt = answeredAt;
+          saveThreads();
+        }
+
+        questionElement.disabled = false;
+        submitButton.disabled = false;
+        questionElement.focus();
       }
 
       async function pollForAnswer(requestId, answerBubble) {
@@ -659,8 +1058,9 @@
 
           if (data.status === "complete") {
             const answer = data.answer ?? JSON.stringify(data, null, 2);
-            setBubbleAnswer(answerBubble, answer);
-            return answer;
+            const answeredAt = Date.now();
+            setBubbleAnswer(answerBubble, answer, answeredAt);
+            return { answer, answeredAt };
           }
 
           if (data.status === "failed") {
@@ -671,34 +1071,84 @@
         throw new Error("The request took too long.");
       }
 
-      function addBubble(kind, text) {
+      // Renders answer text as real markdown (tables, bold, lists, etc.)
+      // instead of showing raw pipe/asterisk characters, then sanitizes the
+      // resulting HTML before it touches the page. marked and DOMPurify are
+      // loaded from CDN at the top of the file. Only used for the agent's
+      // answers -- questions (what the person typed) and error messages
+      // stay as plain text via textContent, which needs no sanitization at
+      // all since it can never be interpreted as HTML/scripts.
+      function renderMarkdownSafely(text) {
+        const html = marked.parse(text ?? "");
+        return DOMPurify.sanitize(html);
+      }
+
+      function formatTimestamp(ms) {
+        return new Date(ms).toLocaleTimeString([], {
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        });
+      }
+
+      function addBubble(kind, text, timestampMs = Date.now()) {
         const turn = document.createElement("div");
-        turn.className = "turn row";
-        turn.style.justifyContent =
-          kind === "question" ? "flex-end" : "flex-start";
+        turn.className = "turn";
 
         const bubble = document.createElement("div");
         bubble.className = `bubble bubble-${kind.startsWith("answer") ? "answer" : "question"}`;
         if (kind.includes("pending")) bubble.classList.add("pending");
         if (kind.includes("error")) bubble.classList.add("error");
-        bubble.textContent = text;
+
+        if (
+          kind.startsWith("answer") &&
+          !kind.includes("pending") &&
+          !kind.includes("error")
+        ) {
+          bubble.classList.add("bubble-markdown");
+          bubble.innerHTML = renderMarkdownSafely(text);
+        } else {
+          bubble.textContent = text;
+        }
+
+        const timestamp = document.createElement("div");
+        timestamp.className = "timestamp";
+        timestamp.textContent = formatTimestamp(timestampMs);
 
         turn.appendChild(bubble);
+        turn.appendChild(timestamp);
+
         chatWindow.appendChild(turn);
         chatWindow.scrollTop = chatWindow.scrollHeight;
+
+        // Stashed so setBubbleAnswer/setBubbleError can update the visible
+        // time once the answer actually arrives, rather than leaving it
+        // stuck at whenever "Working..." was first shown.
+        bubble.timestampEl = timestamp;
         return bubble;
       }
 
-      function setBubbleAnswer(bubble, text) {
+      function setBubbleAnswer(bubble, text, timestampMs = Date.now()) {
         bubble.classList.remove("pending");
-        bubble.textContent = text;
+        bubble.classList.add("bubble-markdown");
+        bubble.innerHTML = renderMarkdownSafely(text);
+        if (bubble.timestampEl) {
+          bubble.timestampEl.textContent = formatTimestamp(timestampMs);
+        }
         chatWindow.scrollTop = chatWindow.scrollHeight;
       }
 
-      function setBubbleError(bubble, text) {
+      function setBubbleError(bubble, text, timestampMs = Date.now()) {
         bubble.classList.remove("pending");
         bubble.classList.add("error");
+        bubble.classList.remove("bubble-markdown");
         bubble.textContent = text;
+        if (bubble.timestampEl) {
+          bubble.timestampEl.textContent = formatTimestamp(timestampMs);
+        }
         chatWindow.scrollTop = chatWindow.scrollHeight;
       }
 
@@ -850,14 +1300,19 @@
         }
 
         for (const message of thread.messages) {
-          addBubble("question", message.question);
+          const askedAt = message.askedAt ?? Date.now();
+          addBubble("question", message.question, askedAt);
 
           if (message.answer === null || message.answer === undefined) {
-            addBubble("answer pending", "Working...");
+            addBubble("answer pending", "Working...", askedAt);
           } else if (message.isError) {
-            addBubble("answer error", message.answer);
+            addBubble(
+              "answer error",
+              message.answer,
+              message.answeredAt ?? askedAt,
+            );
           } else {
-            addBubble("answer", message.answer);
+            addBubble("answer", message.answer, message.answeredAt ?? askedAt);
           }
         }
       }
@@ -917,6 +1372,173 @@
           submitButton.disabled = false;
           questionElement.focus();
         }
+      }
+
+      /**
+       * Download the active thread as a markdown file. Sourced from
+       * localStorage (thread.messages) rather than the backend
+       * CONVERSATIONS_TABLE, since that table only keeps the last few
+       * turns and stores a compacted, prompt-optimized version of each
+       * answer (markdown tables flattened for token efficiency) --
+       * localStorage already has the complete, original-formatting
+       * transcript for the whole thread.
+       */
+      function threadToMarkdown(thread) {
+        const lines = [];
+
+        lines.push(`# ${thread.title || "Chat"}`);
+        lines.push("");
+        lines.push(`- Session ID: ${thread.sessionId}`);
+        if (thread.createdAt) {
+          lines.push(`- Started: ${formatTimestamp(thread.createdAt)}`);
+        }
+        lines.push("");
+        lines.push("---");
+
+        for (const message of thread.messages) {
+          lines.push("");
+          lines.push(`## Q: ${message.question}`);
+          if (message.askedAt) {
+            lines.push(`*Asked: ${formatTimestamp(message.askedAt)}*`);
+          }
+          lines.push("");
+
+          if (message.answer === null || message.answer === undefined) {
+            lines.push("_(no answer recorded)_");
+          } else {
+            lines.push(message.answer);
+          }
+
+          if (message.answeredAt) {
+            lines.push("");
+            lines.push(`*Answered: ${formatTimestamp(message.answeredAt)}*`);
+          }
+
+          lines.push("");
+          lines.push("---");
+        }
+
+        return lines.join("\n");
+      }
+
+      function slugForFilename(text) {
+        return (
+          (text || "chat")
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-+|-+$/g, "")
+            .slice(0, 50) || "chat"
+        );
+      }
+
+      function downloadActiveThread() {
+        const thread = getActiveThread();
+
+        if (!thread || thread.messages.length === 0) {
+          alert("This chat has no questions yet -- nothing to download.");
+          return;
+        }
+
+        const markdown = threadToMarkdown(thread);
+        const blob = new Blob([markdown], { type: "text/markdown" });
+        const url = URL.createObjectURL(blob);
+
+        const dateSlug = new Date(thread.createdAt || Date.now())
+          .toISOString()
+          .slice(0, 10);
+        const filename = `${slugForFilename(thread.title)}-${dateSlug}.md`;
+
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      }
+
+      /**
+       * Change-password modal. Calls the Lambda's changePassword action,
+       * which re-verifies the current password server-side before writing
+       * the new one -- the form here is just presentation.
+       */
+
+      function openChangePasswordModal() {
+        changePasswordUsername.textContent =
+          sessionStorage.getItem(AUTH_USERNAME_KEY) || "you";
+        currentPasswordInput.value = "";
+        newPasswordInput.value = "";
+        confirmPasswordInput.value = "";
+        changePasswordStatus.textContent = "";
+        changePasswordStatus.classList.remove("error");
+        changePasswordModal.classList.remove("hidden");
+        currentPasswordInput.focus();
+      }
+
+      function closeChangePasswordModal() {
+        changePasswordModal.classList.add("hidden");
+      }
+
+      async function handleChangePassword() {
+        const username = sessionStorage.getItem(AUTH_USERNAME_KEY);
+        const currentPassword = currentPasswordInput.value;
+        const newPassword = newPasswordInput.value;
+        const confirmPassword = confirmPasswordInput.value;
+
+        if (!username) {
+          changePasswordStatus.textContent =
+            "Your session doesn't have a username on file -- sign out and back in, then try again.";
+          changePasswordStatus.classList.add("error");
+          return;
+        }
+
+        if (!currentPassword || !newPassword || !confirmPassword) {
+          changePasswordStatus.textContent = "All three fields are required.";
+          changePasswordStatus.classList.add("error");
+          return;
+        }
+
+        if (newPassword !== confirmPassword) {
+          changePasswordStatus.textContent =
+            "New password and confirmation don't match.";
+          changePasswordStatus.classList.add("error");
+          return;
+        }
+
+        changePasswordSave.disabled = true;
+        changePasswordStatus.textContent = "Saving...";
+        changePasswordStatus.classList.remove("error");
+
+        try {
+          await apiChangePassword(username, currentPassword, newPassword);
+          changePasswordStatus.textContent = "Password updated.";
+          currentPasswordInput.value = "";
+          newPasswordInput.value = "";
+          confirmPasswordInput.value = "";
+        } catch (error) {
+          changePasswordStatus.textContent = error.message;
+          changePasswordStatus.classList.add("error");
+        } finally {
+          changePasswordSave.disabled = false;
+        }
+      }
+
+      async function apiChangePassword(username, currentPassword, newPassword) {
+        const response = await fetch(lambdaUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "changePassword",
+            username,
+            currentPassword,
+            newPassword,
+          }),
+        });
+        const data = await readJson(response);
+        if (!response.ok) {
+          throw new Error(data.error || `HTTP ${response.status}`);
+        }
+        return data;
       }
 
       /**

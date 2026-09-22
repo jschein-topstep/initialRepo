@@ -1,0 +1,283 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Cognito (OAuth authorization server) + API Gateway HTTP API (JWT-authorized)
+  fronting the spp-mcp-server Lambda. Token issuance and validation are both
+  handled by AWS-managed pieces (Cognito Hosted UI, API Gateway's native JWT
+  authorizer) rather than hand-written auth code -- see ai/mcpServer/ for the
+  Lambda itself and the DCR-shim rationale.
+
+Parameters:
+  CognitoDomainPrefix:
+    Type: String
+    Default: topstep-spp-mcp
+    Description: >
+      Must be globally unique across all AWS accounts using Cognito prefix
+      domains. Hosted UI will be served at
+      https://<this>.auth.<region>.amazoncognito.com
+
+  ClaudeRedirectUri:
+    Type: String
+    Description: >
+      REQUIRED, no default on purpose -- this is the callback URL Claude.ai
+      shows you when you add this as a custom connector. Deploy once with a
+      placeholder (e.g. https://placeholder.invalid/callback) to get the
+      server up, then redeploy with the real value once you have it; nothing
+      will complete a login until this matches exactly.
+
+  McpServerImageUri:
+    Type: String
+    Description: >
+      REQUIRED -- the ECR image URI for the spp-mcp-server Lambda (build and
+      push via ai/mcpServer/deploy.ps1 or the equivalent docker commands
+      before first deploying this stack; the Lambda resource needs the image
+      to already exist in ECR).
+
+  LambdaExecutionRoleArn:
+    Type: String
+    Default: arn:aws:iam::776528084998:role/TopStepLambdaExecutionRole
+    Description: >
+      Reuses the same execution role already used by aiQueryReports and
+      aiProcessQuestions (CloudWatch Logs, S3, DynamoDB access) rather than
+      creating a new one.
+
+  AnthropicApiKey:
+    Type: String
+    NoEcho: true
+    Description: >
+      Only needed because the reused aiQueryReports/index.js constructs an
+      Anthropic client unconditionally at module load -- this Lambda's MCP
+      tools never actually call it.
+
+  SppInstanceName:
+    Type: String
+    Default: top-step
+
+  TermsTableName:
+    Type: String
+    Default: aiTerms
+
+  SppBaseOAuthConfigKey:
+    Type: String
+    Default: "spp-top step-prod"
+    Description: >
+      The existing oauth_config row (client_id/secret/urls/scope) that
+      per-user SPP connections clone -- see ai/mcpServer/sppUserAuth.js.
+
+Resources:
+  # -------------------------------------------------------
+  # Cognito: the actual OAuth authorization server. Tokens are
+  # issued and validated here -- nothing in this stack re-implements
+  # OAuth token logic.
+  # -------------------------------------------------------
+  SppMcpUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: spp-mcp-users
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true # no public sign-up -- accounts are admin-provisioned
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+
+  SppMcpUserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Ref CognitoDomainPrefix
+      UserPoolId: !Ref SppMcpUserPool
+
+  SppMcpUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: claude-mcp-connector
+      UserPoolId: !Ref SppMcpUserPool
+      GenerateSecret: false # public client -- PKCE covers this, matches OAuth flow claude.ai drives
+      AllowedOAuthFlows: [code]
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthScopes: [openid, email]
+      SupportedIdentityProviders: [COGNITO]
+      CallbackURLs:
+        - !Ref ClaudeRedirectUri
+      ExplicitAuthFlows:
+        - ALLOW_REFRESH_TOKEN_AUTH
+        # Lets an AWS-credentialed admin (IAM AdminInitiateAuth permission --
+        # a much higher trust bar than anything public) mint a token for a
+        # given username/password directly via CLI/SDK, for testing/
+        # debugging without a browser. Doesn't weaken the public-facing PKCE
+        # flow Claude.ai actually uses -- that's unaffected either way.
+        - ALLOW_ADMIN_USER_PASSWORD_AUTH
+
+  # -------------------------------------------------------
+  # Lambda: the MCP server + OAuth metadata/DCR shim (ai/mcpServer/).
+  # -------------------------------------------------------
+  SppMcpServerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: sppMcpServer
+      PackageType: Image
+      Code:
+        ImageUri: !Ref McpServerImageUri
+      Role: !Ref LambdaExecutionRoleArn
+      Timeout: 60
+      MemorySize: 1024
+      # No Layers here -- AWS does not support Lambda Layers on
+      # PackageType: Image functions at all. oauthUtils.mjs/sharedUtils.js
+      # (normally attached via the "sharedUtils" layer) are instead COPY'd
+      # into this image directly, same as aiQueryReports/index.js is. See
+      # the Dockerfile.
+      Environment:
+        Variables:
+          SPP_INSTANCE_NAME: !Ref SppInstanceName
+          ANTHROPIC_API_KEY: !Ref AnthropicApiKey
+          TERMS_TABLE: !Ref TermsTableName
+          COGNITO_ISSUER: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${SppMcpUserPool}"
+          COGNITO_AUTHORIZATION_ENDPOINT: !Sub "https://${SppMcpUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com/oauth2/authorize"
+          COGNITO_TOKEN_ENDPOINT: !Sub "https://${SppMcpUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com/oauth2/token"
+          COGNITO_CLIENT_ID: !Ref SppMcpUserPoolClient
+          MCP_SERVER_BASE_URL: !Sub "https://${SppMcpApi}.execute-api.${AWS::Region}.amazonaws.com"
+          FILTER_CACHE_TABLE: !Ref SppFilterCacheTable
+          SPP_BASE_OAUTH_CONFIG_KEY: !Ref SppBaseOAuthConfigKey
+
+  SppMcpApiInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref SppMcpServerFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${SppMcpApi}/*/*"
+
+  # -------------------------------------------------------
+  # API Gateway: the resource server. JWT authorizer validates
+  # Cognito-issued tokens natively -- no hand-written token
+  # verification code.
+  # -------------------------------------------------------
+  SppMcpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: spp-mcp-server
+      ProtocolType: HTTP
+
+  SppMcpApiIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref SppMcpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt SppMcpServerFunction.Arn
+      PayloadFormatVersion: "2.0"
+
+  SppMcpApiAuthorizer:
+    Type: AWS::ApiGatewayV2::Authorizer
+    Properties:
+      ApiId: !Ref SppMcpApi
+      AuthorizerType: JWT
+      Name: cognito-jwt
+      IdentitySource:
+        - "$request.header.Authorization"
+      JwtConfiguration:
+        Issuer: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${SppMcpUserPool}"
+        Audience:
+          - !Ref SppMcpUserPoolClient
+
+  # Protected -- the actual MCP endpoint.
+  SppMcpRouteMcp:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref SppMcpApi
+      RouteKey: "ANY /mcp"
+      AuthorizationType: JWT
+      AuthorizerId: !Ref SppMcpApiAuthorizer
+      Target: !Sub "integrations/${SppMcpApiIntegration}"
+
+  # Unauthenticated on purpose -- OAuth discovery/registration has to be
+  # reachable before a client has a token.
+  SppMcpRouteProtectedResourceMeta:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref SppMcpApi
+      RouteKey: "GET /.well-known/oauth-protected-resource"
+      Target: !Sub "integrations/${SppMcpApiIntegration}"
+
+  SppMcpRouteAuthServerMeta:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref SppMcpApi
+      RouteKey: "GET /.well-known/oauth-authorization-server"
+      Target: !Sub "integrations/${SppMcpApiIntegration}"
+
+  SppMcpRouteRegister:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref SppMcpApi
+      RouteKey: "POST /register"
+      Target: !Sub "integrations/${SppMcpApiIntegration}"
+
+  SppMcpRouteHealth:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref SppMcpApi
+      RouteKey: "GET /"
+      Target: !Sub "integrations/${SppMcpApiIntegration}"
+
+  SppMcpApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref SppMcpApi
+      StageName: "$default"
+      AutoDeploy: true
+
+  # -------------------------------------------------------
+  # Filter-set enforcement: cached per-user permitted-ID lists
+  # (fetched from SPP's REST API, which applies each person's
+  # own filter set server-side -- see ai/mcpServer/sppRestClient.js).
+  # A live SPP call per question would be too slow; this is
+  # refreshed periodically by SppFilterCacheRefreshRule instead.
+  # -------------------------------------------------------
+  SppFilterCacheTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: sppFilterCache
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: email
+          AttributeType: S
+      KeySchema:
+        - AttributeName: email
+          KeyType: HASH
+
+  SppFilterCacheRefreshRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: spp-filter-cache-refresh
+      ScheduleExpression: "rate(6 hours)"
+      State: ENABLED
+      Targets:
+        - Id: SppMcpServerFunction
+          Arn: !GetAtt SppMcpServerFunction.Arn
+          Input: '{"action":"refreshFilterCache"}'
+
+  SppFilterCacheRefreshPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref SppMcpServerFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt SppFilterCacheRefreshRule.Arn
+
+Outputs:
+  McpServerBaseUrl:
+    Value: !Sub "https://${SppMcpApi}.execute-api.${AWS::Region}.amazonaws.com"
+  McpEndpointUrl:
+    Value: !Sub "https://${SppMcpApi}.execute-api.${AWS::Region}.amazonaws.com/mcp"
+  HostedUIDomain:
+    Value: !Sub "https://${SppMcpUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com"
+  UserPoolId:
+    Value: !Ref SppMcpUserPool
+  UserPoolClientId:
+    Value: !Ref SppMcpUserPoolClient
+  FilterCacheTableName:
+    Value: !Ref SppFilterCacheTable

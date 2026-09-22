@@ -90,7 +90,12 @@ export const handler = async (event) => {
     console.log(`[exchangeCodeForTokens] Tokens saved for "${integrationKey}"`);
 
     // ── Respond ─────────────────────────────────────────────────────────
-    const successRedirect = process.env.OAUTH_SUCCESS_REDIRECT_URI;
+    // A per-row redirect (config.success_redirect_uri) takes priority over
+    // the global env var, since this Lambda is shared across multiple
+    // company-level SPP integrations -- a global redirect would send every
+    // one of them somewhere that's only meaningful for one specific caller.
+    const successRedirect =
+      config.success_redirect_uri || process.env.OAUTH_SUCCESS_REDIRECT_URI;
 
     if (successRedirect) {
       return {

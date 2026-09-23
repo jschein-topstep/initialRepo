@@ -48,7 +48,7 @@ export const handler = async (event = {}) => {
     }
   }
 
-  const subsidiaryKey = (
+  let subsidiaryKey = (
     requestBody.subsidiary ||
     event.subsidiary || // still supported for direct/manual invocation in the Lambda console
     process.env.DEFAULT_SUBSIDIARY ||

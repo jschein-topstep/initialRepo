@@ -46,7 +46,12 @@ Resources:
       Timeout: 900 # 15 minutes -- Lambda's hard maximum; large tables may
                    # still need multiple manual re-invocations to fully
                    # catch up on their first (full-load) run.
-      MemorySize: 1024
+      MemorySize: 3008 # bumped from 1024 -- a 288k-row/16-field production
+                       # table maxed out 1024 MB (fetchAllPages holds the
+                       # whole batch in memory, and mergeIntoS3Csv loads the
+                       # full existing CSV + full new batch into DuckDB at
+                       # once), so bigger tables risk OOM at the old size.
+                       # Also buys more CPU, which Lambda scales with memory.
       Environment:
         Variables:
           WATERMARKS_TABLE: !Ref SppSyncWatermarksTable

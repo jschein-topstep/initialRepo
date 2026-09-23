@@ -17,54 +17,30 @@ const DATA_PREFIX = "spp-data";
 const basePath = `s3://${BUCKET}/${DATA_PREFIX}/${instanceName}`;
 console.log("basePath: " + basePath);
 
+// Cut over from Celigo's recent/historical split files to sppDataSync's
+// single incrementally-merged file per table (spp-data/{company}/sync/). A
+// single-path entry gets a one-branch UNION ALL downstream -- functionally
+// a no-op vs. the old two-path arrays, so nothing else needed to change to
+// support this. Every one of these files carries a synthetic "deleted"
+// column (see sppDataSync.js) that the old recent/historical files never
+// had -- materializeTables strips it out (both the rows and the column
+// itself), matching the old files' behavior of never containing deleted
+// records at all.
 const REPORT_VIEWS = {
-  booking: [
-    `${basePath}/recent/booking.csv`,
-    `${basePath}/historical/booking.csv`,
-  ],
-  charges: [`${basePath}/recent/slip.csv`, `${basePath}/historical/slip.csv`],
-  customers: [
-    `${basePath}/recent/customer.csv`,
-    `${basePath}/historical/customer.csv`,
-  ],
-  expenseReports: [
-    `${basePath}/recent/envelope.csv`,
-    `${basePath}/historical/envelope.csv`,
-  ],
-  invoices: [
-    `${basePath}/recent/invoice.csv`,
-    `${basePath}/historical/invoice.csv`,
-  ],
-  projectBillingRules: [
-    `${basePath}/recent/project_billing_rule.csv`,
-    `${basePath}/historical/project_billing_rule.csv`,
-  ],
+  booking: `${basePath}/sync/booking.csv`,
+  charges: `${basePath}/sync/slip.csv`,
+  customers: `${basePath}/sync/customer.csv`,
+  expenseReports: `${basePath}/sync/envelope.csv`,
+  invoices: `${basePath}/sync/invoice.csv`,
+  projectBillingRules: `${basePath}/sync/project_billing_rule.csv`,
   //projectMetrics: `${basePath}/ANALYSIS__transactions_by_Project_User_report_pivot.csv`,
-  projects: [
-    `${basePath}/recent/project.csv`,
-    `${basePath}/historical/project.csv`,
-  ],
-  projectStages: [
-    `${basePath}/recent/project_stage.csv`,
-    `${basePath}/historical/project_stage.csv`,
-  ],
-  receipts: [
-    `${basePath}/recent/ticket.csv`,
-    `${basePath}/historical/ticket.csv`,
-  ],
-  tasks: [
-    `${basePath}/recent/project_task.csv`,
-    `${basePath}/historical/project_task.csv`,
-  ],
-  timeEntries: [
-    `${basePath}/recent/task.csv`,
-    `${basePath}/historical/task.csv`,
-  ],
-  timesheets: [
-    `${basePath}/recent/timesheet.csv`,
-    `${basePath}/historical/timesheet.csv`,
-  ],
-  users: [`${basePath}/recent/user.csv`, `${basePath}/historical/user.csv`],
+  projects: `${basePath}/sync/project.csv`,
+  projectStages: `${basePath}/sync/project_stage.csv`,
+  receipts: `${basePath}/sync/ticket.csv`,
+  tasks: `${basePath}/sync/project_task.csv`,
+  timeEntries: `${basePath}/sync/task.csv`,
+  timesheets: `${basePath}/sync/timesheet.csv`,
+  users: `${basePath}/sync/user.csv`,
 };
 
 // One JSON file per table, e.g.:
@@ -114,11 +90,15 @@ const DATE_COLUMNS_COMMON = {
 // entry here per instanceName as each tenant's custom date fields are
 // identified, rather than assuming they're universal (that assumption is
 // what broke when a second tenant's users table had no custom_208 column).
+//
+// "top-step" has no custom_208 entry here (unlike "top-step-sandbox") as of
+// the sppDataSync cutover -- its master.csv doesn't request that field, so
+// it's not a column in the synced user.csv at all, and read_csv_auto's
+// types={} override hard-errors on a column name that doesn't exist in the
+// file (breaking the WHOLE users table, not just that column). Add it back
+// here if it's ever added to the master.csv.
 const DATE_COLUMNS_BY_INSTANCE = {
   "top-step-sandbox": {
-    users: ["custom_208"],
-  },
-  "top-step": {
     users: ["custom_208"],
   },
   // "triton": { /* add triton-specific custom date columns here if any */ },
@@ -462,21 +442,38 @@ async function materializeTables(connection, viewNames) {
     // "0000-00-00" sentinel, real NULLs, and genuinely invalid values, all
     // in the same column. Add more formats here if a future dataset uses
     // something else (e.g. "%d/%m/%Y" for day-first locales).
-    const DATE_FORMATS = ["'%Y-%m-%d'", "'%m/%d/%Y'"];
+    //
+    // '%Y-%m-%d %H:%M:%S' is required for sppDataSync's audit columns --
+    // flattenFieldValue deliberately keeps full time-of-day precision for
+    // created/updated (e.g. "2026-09-15 12:31:07"), unlike plain "date"
+    // business fields, which stay date-only. Without this format,
+    // try_strptime matches neither of the other two and CAST(NULL AS DATE)
+    // silently succeeds -- confirmed live: 0 of 2310 projects had a
+    // non-null "created" before this was added, despite every row having a
+    // real value in the raw S3 file. The CAST to DATE below still drops
+    // the time component on purpose, same as it always has -- this format
+    // just lets a real value get through try_strptime in the first place.
+    const DATE_FORMATS = ["'%Y-%m-%d %H:%M:%S'", "'%Y-%m-%d'", "'%m/%d/%Y'"];
 
+    // Every sync file carries a synthetic "deleted" column (see
+    // sppDataSync.js) that the old Celigo recent/historical files never
+    // had -- EXCLUDE drops it from the materialized schema entirely (the
+    // AI agent never sees or has to reason about it), and the WHERE below
+    // drops the rows themselves, matching the old files' behavior of never
+    // containing deleted records in the first place.
     const selectClause =
       dateCols.length > 0
-        ? `SELECT * REPLACE (${dateCols
+        ? `SELECT * EXCLUDE (deleted) REPLACE (${dateCols
             .map(
               (col) =>
                 `CAST(try_strptime(NULLIF("${col}", '0000-00-00'), [${DATE_FORMATS.join(", ")}]) AS DATE) AS "${col}"`,
             )
             .join(", ")})`
-        : "SELECT *";
+        : "SELECT * EXCLUDE (deleted)";
 
     const t0 = Date.now();
     await connection.run(
-      `CREATE OR REPLACE TABLE ${viewName} AS ${selectClause} FROM (${unionedSource}) AS combined;`,
+      `CREATE OR REPLACE TABLE ${viewName} AS ${selectClause} FROM (${unionedSource}) AS combined WHERE COALESCE(deleted, '0') != '1';`,
     );
     console.log(`Materialized "${viewName}" in ${Date.now() - t0}ms`);
   }

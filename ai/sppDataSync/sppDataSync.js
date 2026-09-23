@@ -82,7 +82,16 @@ async function setupDuckDB(region) {
 // --- Master config -----------------------------------------------------
 
 // Reads spp-data/{company}/_config/master.csv and groups rows by
-// localTable. Each group: { sppType, fields: [{sppField, csvField}] }.
+// localTable. Each group: { sppType, fields: [{sppField, subKey, csvField}] }.
+//
+// sppField may carry a dotted sub-path (e.g. "addr.city") to pull one named
+// piece out of a compound field -- SPP always returns the WHOLE nested
+// object for a compound field (confirmed for both dates and addresses, via
+// Postman), there's no way to ask it for just one sub-part server-side, so
+// "addr" is still what gets requested from SPP; "city" just says which
+// piece of the response to extract client-side. See extractSubFieldValue.
+// A plain sppField with no dot (subKey undefined) is unaffected by this --
+// same single string as before, same flattenFieldValue call site.
 async function readMasterConfig(connection, company) {
   const path = s3Path(company, "_config", "master.csv");
   const reader = await connection.runAndReadAll(
@@ -99,8 +108,14 @@ async function readMasterConfig(connection, company) {
     // comment) -- drop it here if someone's master file lists it, rather
     // than sending SPP a field name that silently returns nothing.
     if (row.sppField === DELETED_CSV_FIELD) continue;
+
+    const dotIndex = row.sppField.indexOf(".");
+    const sppField = dotIndex === -1 ? row.sppField : row.sppField.slice(0, dotIndex);
+    const subKey = dotIndex === -1 ? undefined : row.sppField.slice(dotIndex + 1);
+
     byTable[row.localTable].fields.push({
-      sppField: row.sppField,
+      sppField,
+      subKey,
       csvField: row.csvField,
     });
   }
@@ -226,6 +241,33 @@ function flattenFieldValue(value) {
   return `${datePart} ${String(hour).padStart(2, "0")}:${String(minute || 0).padStart(2, "0")}:${String(second || 0).padStart(2, "0")}`;
 }
 
+// Pulls one named piece out of a compound field's nested value -- e.g.
+// addr -> <addr><Address><city>...</city>...</Address></addr>, so
+// extractSubFieldValue(rawRow.addr, "city") drills into the single nested
+// wrapper (whatever it's called -- "Address" here, generic rather than
+// hardcoded since other compound field types may wrap under a different
+// name) and returns that one sub-value. Entirely separate from, and never
+// called in place of, flattenFieldValue -- a field with no subKey (every
+// master.csv row before this feature, and every date field regardless)
+// still goes through flattenFieldValue exactly as before.
+function extractSubFieldValue(value, subKey) {
+  if (value === null || value === undefined) return value;
+  if (typeof value !== "object") return String(value);
+
+  const keys = Object.keys(value);
+  const wrapper =
+    keys.length === 1 && typeof value[keys[0]] === "object" && value[keys[0]] !== null
+      ? value[keys[0]]
+      : value;
+
+  const raw = wrapper[subKey];
+  if (raw === null || raw === undefined) return raw;
+  if (typeof raw !== "object") return String(raw);
+  // A sub-field that's itself compound (unexpected) -- don't silently drop
+  // data, but don't try to guess how to flatten it either.
+  return JSON.stringify(raw);
+}
+
 const xmlParser = new XMLParser();
 
 // Runs one paginated Read against SPP, returning the raw parsed rows
@@ -276,7 +318,11 @@ async function fetchDeletedIds({ xmlUrl, apiKey, accessToken, sppType, watermark
 }
 
 async function fetchAllPages({ xmlUrl, apiKey, accessToken, sppType, fields, watermark }) {
-  const sppFieldNames = fields.map((f) => f.sppField);
+  // Dedupe -- several fields can share the same base sppField (e.g.
+  // addr.city and addr.state both come from requesting "addr" once), so
+  // request each base field from SPP only once regardless of how many
+  // csvFields extract pieces from it.
+  const sppFieldNames = [...new Set(fields.map((f) => f.sppField))];
 
   const [rawRows, deletedIds] = await Promise.all([
     fetchAllPagesRaw({ xmlUrl, apiKey, accessToken, sppType, sppFieldNames, watermark, deletedMode: "both" }),
@@ -287,7 +333,9 @@ async function fetchAllPages({ xmlUrl, apiKey, accessToken, sppType, fields, wat
   for (const rawRow of rawRows) {
     const csvRow = {};
     for (const field of fields) {
-      csvRow[field.csvField] = flattenFieldValue(rawRow[field.sppField]);
+      csvRow[field.csvField] = field.subKey
+        ? extractSubFieldValue(rawRow[field.sppField], field.subKey)
+        : flattenFieldValue(rawRow[field.sppField]);
     }
     csvRow[DELETED_CSV_FIELD] = deletedIds.has(String(rawRow.id)) ? "1" : "0";
     rows.push(csvRow);
@@ -341,10 +389,34 @@ async function mergeIntoS3Csv(connection, company, localTable, fields, newRows) 
   );
   fs.unlinkSync(batchFile);
 
+  // Master.csv can gain new columns over time (e.g. adding an addr.email
+  // row to an already-synced table) -- the existing S3 file won't have
+  // that column yet. Inspect its ACTUAL schema first via DESCRIBE rather
+  // than assuming it matches the current column list: reading it with a
+  // column list that references a column it doesn't have throws a Binder
+  // Error, and treating that the same as "file doesn't exist" (as this
+  // used to) silently discards every previously-synced row the very first
+  // time a field gets added -- confirmed happening in production. A column
+  // present in the current schema but missing from the old file gets
+  // NULL-filled here instead, so old rows survive and self-heal the next
+  // time each one is re-synced for real.
   let existingExists = true;
   try {
+    const describeReader = await connection.runAndReadAll(
+      `DESCRIBE SELECT * FROM read_csv_auto('${outputPath}', header=true);`,
+    );
+    const existingColumns = new Set(
+      (await describeReader.getRowObjects()).map((r) => r.column_name),
+    );
+    const existingColumnList = columns
+      .map((c) =>
+        existingColumns.has(c)
+          ? `CAST("${c}" AS VARCHAR) AS "${c}"`
+          : `NULL AS "${c}"`,
+      )
+      .join(", ");
     await connection.run(
-      `CREATE OR REPLACE TABLE existing_data AS SELECT ${columnList} FROM read_csv_auto('${outputPath}', header=true);`,
+      `CREATE OR REPLACE TABLE existing_data AS SELECT ${existingColumnList} FROM read_csv_auto('${outputPath}', header=true);`,
     );
   } catch {
     existingExists = false;
@@ -459,6 +531,7 @@ exports.handler = async (event) => {
 exports._internal = {
   buildReadXml,
   flattenFieldValue,
+  extractSubFieldValue,
   fetchAllPagesRaw,
   fetchDeletedIds,
   fetchAllPages,

@@ -1,0 +1,58 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Infrastructure for sppDataSync (ai/sppDataSync/) -- replaces Celigo for
+  populating the SPP data CSVs in S3. Manually invoked for now (no schedule,
+  no API Gateway) -- see the Lambda's own comments for the sync design.
+
+Parameters:
+  SppDataSyncImageUri:
+    Type: String
+    Description: >
+      REQUIRED -- the ECR image URI for the sppDataSync Lambda (build and
+      push via ai/sppDataSync/deploy.ps1, or the equivalent docker commands,
+      before first deploying this stack; the Lambda resource needs the
+      image to already exist in ECR).
+
+  LambdaExecutionRoleArn:
+    Type: String
+    Default: arn:aws:iam::776528084998:role/TopStepLambdaExecutionRole
+    Description: >
+      Reuses the same execution role already used by every other Lambda in
+      this project (CloudWatch Logs, S3, DynamoDB, SSM access).
+
+Resources:
+  SppSyncWatermarksTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: sppSyncWatermarks
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+
+  SppDataSyncFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: sppDataSync
+      PackageType: Image
+      Code:
+        ImageUri: !Ref SppDataSyncImageUri
+      Role: !Ref LambdaExecutionRoleArn
+      Timeout: 900 # 15 minutes -- Lambda's hard maximum; large tables may
+                   # still need multiple manual re-invocations to fully
+                   # catch up on their first (full-load) run.
+      MemorySize: 1024
+      Environment:
+        Variables:
+          WATERMARKS_TABLE: !Ref SppSyncWatermarksTable
+
+Outputs:
+  FunctionName:
+    Value: !Ref SppDataSyncFunction
+  WatermarksTableName:
+    Value: !Ref SppSyncWatermarksTable

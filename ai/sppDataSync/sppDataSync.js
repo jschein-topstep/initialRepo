@@ -535,11 +535,12 @@ async function mergeIntoS3Csv(connection, company, localTable, fields, newRows) 
   if (newRows.length === 0) {
     // Nothing changed -- leave the file untouched rather than doing a
     // pointless read/rewrite. Still report its real row count so callers
-    // don't read "rowsWritten: 0" as "the file is now empty".
+    // don't read "rowsWritten: 0" as "the file is now empty". sample_size=-1
+    // for the same reason as the reads below -- see that comment.
     let rowsWritten = 0;
     try {
       const reader = await connection.runAndReadAll(
-        `SELECT COUNT(*) AS n FROM read_csv_auto('${outputPath}', header=true);`,
+        `SELECT COUNT(*) AS n FROM read_csv_auto('${outputPath}', header=true, sample_size=-1);`,
       );
       rowsWritten = Number((await reader.getRowObjects())[0].n);
     } catch {
@@ -583,10 +584,22 @@ async function mergeIntoS3Csv(connection, company, localTable, fields, newRows) 
   // present in the current schema but missing from the old file gets
   // NULL-filled here instead, so old rows survive and self-heal the next
   // time each one is re-synced for real.
+  //
+  // sample_size=-1 on BOTH reads below is not optional: without it,
+  // read_csv_auto infers each column's type from only its default
+  // 20,480-row sample, and a value elsewhere in a large file that doesn't
+  // fit that inferred type (e.g. an empty string for a column the sample
+  // looked all-numeric) throws a Conversion Error reading the REST of the
+  // file. That exception used to land in the catch below, which is
+  // EXACTLY the "file doesn't exist" path -- confirmed happening in
+  // production on a 288k-row table, silently overwriting the entire file
+  // with just the current incremental batch. aiQueryReports/index.js
+  // already carries this exact lesson in its own comments; this file's
+  // own reads of its own previously-written CSV just hadn't gotten it yet.
   let existingExists = true;
   try {
     const describeReader = await connection.runAndReadAll(
-      `DESCRIBE SELECT * FROM read_csv_auto('${outputPath}', header=true);`,
+      `DESCRIBE SELECT * FROM read_csv_auto('${outputPath}', header=true, sample_size=-1);`,
     );
     const existingColumns = new Set(
       (await describeReader.getRowObjects()).map((r) => r.column_name),
@@ -599,9 +612,21 @@ async function mergeIntoS3Csv(connection, company, localTable, fields, newRows) 
       )
       .join(", ");
     await connection.run(
-      `CREATE OR REPLACE TABLE existing_data AS SELECT ${existingColumnList} FROM read_csv_auto('${outputPath}', header=true);`,
+      `CREATE OR REPLACE TABLE existing_data AS SELECT ${existingColumnList} FROM read_csv_auto('${outputPath}', header=true, sample_size=-1);`,
     );
-  } catch {
+  } catch (error) {
+    // Only a genuinely missing file (confirmed: DuckDB/httpfs surfaces
+    // this as an HTTP 404 in the error message) means "no existing data,
+    // safe to treat this as a first load." Anything else -- a transient
+    // S3/network error, a real parsing problem sample_size=-1 didn't fix,
+    // anything -- must NOT fall into that same branch: doing so is
+    // exactly how a 288k-row table's entire file got silently replaced by
+    // one incremental batch in production. Let it propagate instead; the
+    // per-table try/catch in the handler reports it as a real failure
+    // (watermark left untouched, safe to retry) rather than data loss.
+    if (!/HTTP 404/.test(error.message)) {
+      throw error;
+    }
     existingExists = false;
   }
 

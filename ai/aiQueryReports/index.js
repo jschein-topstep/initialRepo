@@ -5,6 +5,13 @@
 
 // deploy.ps1, buildspec.yml, and Dockerfile are included at the bottom of this file for reference.
 
+// To redeploy sppMcpServer:
+//docker buildx build --platform linux/amd64 --provenance=false --output=type=docker -f ai/mcpServer/Dockerfile -t spp-mcp-server . 2>&1 | tail -10 && \
+// docker tag spp-mcp-server:latest 776528084998.dkr.ecr.us-east-2.amazonaws.com/spp-mcp-server:latest && \
+// docker push 776528084998.dkr.ecr.us-east-2.amazonaws.com/spp-mcp-server:latest 2>&1 | tail -5 && \
+// aws lambda update-function-code --function-name sppMcpServer --image-uri 776528084998.dkr.ecr.us-east-2.amazonaws.com/spp-mcp-server:latest --region us-east-2 --query "LastUpdateStatus" --output text && \
+// aws lambda wait function-updated --function-name sppMcpServer --region us-east-2 && echo "sppMcpServer updated"
+
 const { DuckDBInstance } = require("@duckdb/node-api");
 const { S3Client, HeadObjectCommand } = require("@aws-sdk/client-s3");
 const Anthropic = require("@anthropic-ai/sdk");
@@ -41,6 +48,24 @@ const REPORT_VIEWS = {
   timeEntries: `${basePath}/sync/task.csv`,
   timesheets: `${basePath}/sync/timesheet.csv`,
   users: `${basePath}/sync/user.csv`,
+  bookingTypes: `${basePath}/sync/booking_type.csv`,
+  budgets: `${basePath}/sync/budget.csv`,
+  categories: `${basePath}/sync/category.csv`,
+  additionalTeams: `${basePath}/sync/category_1.csv`,
+  costCenters: `${basePath}/sync/cost_center.csv`,
+  customerPOs: `${basePath}/sync/customer_po.csv`,
+  customerPoProjectLinks: `${basePath}/sync/customer_po_to_project.csv`,
+  departments: `${basePath}/sync/department.csv`,
+  items: `${basePath}/sync/item.csv`,
+  jobCodes: `${basePath}/sync/job_code.csv`,
+  projectTaskAssignments: `${basePath}/sync/project_task_assignment.csv`,
+  revenueRecognitionRules: `${basePath}/sync/revenue_recognition_rule.csv`,
+  revenueRecognitionTransactions: `${basePath}/sync/revenue_recognition_transaction.csv`,
+  scriptRequests: `${basePath}/sync/issue.csv`,
+  subrecordCategories: `${basePath}/sync/issue_category.csv`,
+  scriptRequestPriority: `${basePath}/sync/issue_severity.csv`,
+  scriptType: `${basePath}/sync/issue_source.csv`,
+  scriptRequestStage: `${basePath}/sync/issue_stage.csv`,
 };
 
 // One JSON file per table, e.g.:
@@ -83,6 +108,31 @@ const DATE_COLUMNS_COMMON = {
   projectBillingRules: ["created", "updated"],
   receipts: ["date", "created", "updated"],
   timesheets: ["starts", "ends", "created", "updated"],
+  bookingTypes: ["created", "updated"],
+  budgets: ["date", "created", "updated"],
+  categories: ["created", "updated"],
+  additionalTeams: ["created", "updated"],
+  costCenters: ["created", "updated"],
+  customerPOs: ["date", "created", "updated"],
+  customerPoProjectLinks: ["created", "updated"],
+  departments: ["created", "updated"],
+  items: ["created", "updated"],
+  jobCodes: ["created", "updated"],
+  projectTaskAssignments: ["created", "updated"],
+  revenueRecognitionRules: ["start_date", "end_date", "created", "updated"],
+  revenueRecognitionTransactions: ["date", "created", "updated"],
+  scriptRequests: [
+    "date",
+    "date_resolution_expected",
+    "date_resolution_required",
+    "date_resolved",
+    "created",
+    "updated",
+  ],
+  subrecordCategories: ["created", "updated"],
+  scriptRequestPriority: ["created", "updated"],
+  scriptType: ["created", "updated"],
+  scriptRequestStage: ["created", "updated"],
 };
 
 // Custom fields (custom_NNN) are configured per SPP instance -- a column
@@ -156,6 +206,89 @@ const RELATIONSHIPS = {
   "timeEntries.project_task_id": { table: "tasks", column: "id" },
   "timeEntries.user_id": { table: "users", column: "id" },
   "timesheets.user_id": { table: "users", column: "id" },
+  "budgets.category_id": { table: "categories", column: "id" },
+  "budgets.customer_id": { table: "customers", column: "id" },
+  "budgets.project_id": { table: "projects", column: "id" },
+  "categories.cost_center_id": { table: "costCenters", column: "id" },
+  "customerPOs.customer_id": { table: "customers", column: "id" },
+  "customerPoProjectLinks.customer_po_id": {
+    table: "customerPOs",
+    column: "id",
+  },
+  "customerPoProjectLinks.project_id": { table: "projects", column: "id" },
+  "departments.user_id": { table: "users", column: "id" },
+  "items.cost_center_id": { table: "costCenters", column: "id" },
+  "projectTaskAssignments.job_code_id": { table: "jobCodes", column: "id" },
+  "projectTaskAssignments.project_task_id": { table: "tasks", column: "id" },
+  "projectTaskAssignments.user_id": { table: "users", column: "id" },
+  "revenueRecognitionRules.customer_id": { table: "customers", column: "id" },
+  "revenueRecognitionRules.project_id": { table: "projects", column: "id" },
+  "revenueRecognitionRules.category_id": { table: "categories", column: "id" },
+  "revenueRecognitionRules.cost_center_id": {
+    table: "costCenters",
+    column: "id",
+  },
+  "revenueRecognitionRules.customer_po_id": {
+    table: "customerPOs",
+    column: "id",
+  },
+  "revenueRecognitionTransactions.customer_id": {
+    table: "customers",
+    column: "id",
+  },
+  "revenueRecognitionTransactions.project_id": {
+    table: "projects",
+    column: "id",
+  },
+  "revenueRecognitionTransactions.project_task_id": {
+    table: "tasks",
+    column: "id",
+  },
+  "revenueRecognitionTransactions.slip_id": { table: "charges", column: "id" },
+  "revenueRecognitionTransactions.revenue_recognition_rule_id": {
+    table: "revenueRecognitionRules",
+    column: "id",
+  },
+  "revenueRecognitionTransactions.category_id": {
+    table: "categories",
+    column: "id",
+  },
+  "revenueRecognitionTransactions.cost_center_id": {
+    table: "costCenters",
+    column: "id",
+  },
+  "revenueRecognitionTransactions.customer_po_id": {
+    table: "customerPOs",
+    column: "id",
+  },
+  "revenueRecognitionTransactions.job_code_id": {
+    table: "jobCodes",
+    column: "id",
+  },
+  "revenueRecognitionTransactions.task_id": {
+    table: "timeEntries",
+    column: "id",
+  },
+  "revenueRecognitionTransactions.ticket_id": {
+    table: "receipts",
+    column: "id",
+  },
+  "revenueRecognitionTransactions.user_id": { table: "users", column: "id" },
+  "scriptRequests.issue_category_id": {
+    table: "issueCategories",
+    column: "id",
+  },
+  "scriptRequests.issue_severity_id": {
+    table: "issueSeverities",
+    column: "id",
+  },
+  "scriptRequests.issue_source_id": { table: "issueSources", column: "id" },
+  "scriptRequests.issue_stage_id": { table: "issueStages", column: "id" },
+  "scriptRequests.owner_id": { table: "users", column: "id" },
+  "scriptRequests.project_id": { table: "projects", column: "id" },
+  "scriptRequests.project_task_id": { table: "tasks", column: "id" },
+  "scriptRequests.user_id": { table: "users", column: "id" },
+  "scriptRequests.customer_id": { table: "customers", column: "id" },
 };
 
 // --- Connection + materialization caching ---------------------------------

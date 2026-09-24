@@ -25,6 +25,7 @@ const {
   DynamoDBClient,
   GetItemCommand,
   PutItemCommand,
+  UpdateItemCommand,
 } = require("@aws-sdk/client-dynamodb");
 const { marshall, unmarshall } = require("@aws-sdk/util-dynamodb");
 const { SSMClient, GetParameterCommand } = require("@aws-sdk/client-ssm");
@@ -37,14 +38,28 @@ const DATA_PREFIX = "spp-data";
 const WATERMARKS_TABLE = process.env.WATERMARKS_TABLE || "sppSyncWatermarks";
 const PAGE_SIZE = 1000;
 
+// Once less than this remains on the Lambda's clock, stop starting new
+// work for the current table: flush whatever's pending, checkpoint
+// progress, and return "partial" instead of racing the hard 900s cutoff.
+// Sized to comfortably cover one worst-case mergeIntoS3Csv call (a full
+// read-modify-write of the existing S3 file), which grows as a table's
+// backfill progresses.
+const BACKFILL_TIME_BUDGET_MS = 90_000;
+
+// Rows accumulated in memory before an incremental merge-to-S3 flush
+// during a table's backfill. Smaller = less progress lost per timeout,
+// larger = fewer (cheaper) full-file merge/rewrite cycles -- see
+// runFieldDataPhase.
+const MERGE_BATCH_SIZE = 25_000;
+
 // Every table gets "id" in its SPP field list regardless of what's in the
 // master config -- required by the merge step below. "deleted" is NOT a
 // requestable field value (confirmed empirically: even querying
 // deleted="1" for records known to be deleted, no <deleted> element comes
 // back at all) -- deletion status is purely a query-mode thing (which
 // combination of deleted="1"/include_nondeleted="1" you used), not a
-// per-row field. It's computed separately in fetchDeletedIds() below and
-// merged in as a synthetic column, not requested via _Return.
+// per-row field. It's computed separately in runDeletedIdsPhase() below
+// and merged in as a synthetic column, not requested via _Return.
 const ALWAYS_INCLUDED_SPP_FIELDS = ["id"];
 const DELETED_CSV_FIELD = "deleted";
 
@@ -134,9 +149,15 @@ async function readMasterConfig(connection, company) {
   return byTable;
 }
 
-// --- Watermarks -----------------------------------------------------------
+// --- Sync state: committed watermark + resumable backfill progress --------
+//
+// A table's sync can span multiple Lambda invocations: if bringing it up
+// to date takes longer than fits in one 900s run, progress is checkpointed
+// here between attempts (see runTableSync below) instead of restarting
+// from scratch every time -- confirmed necessary in practice (a customer's
+// "task" table ran past 13 minutes with the old all-in-one-shot design).
 
-function watermarkKey(integrationKey, localTable) {
+function syncStateKey(integrationKey, localTable) {
   return `${integrationKey}#${localTable}`;
 }
 
@@ -144,26 +165,61 @@ function watermarkKey(integrationKey, localTable) {
 // giving a full load on a table's first-ever run.
 const EPOCH_START = { year: 2000, month: 1, day: 1 };
 
-async function getWatermark(integrationKey, localTable) {
-  const result = await dynamo.send(
-    new GetItemCommand({
-      TableName: WATERMARKS_TABLE,
-      Key: marshall({ pk: watermarkKey(integrationKey, localTable) }),
-    }),
-  );
-  if (!result.Item) return EPOCH_START;
-  const item = unmarshall(result.Item);
-  const d = new Date(item.lastSyncedAt * 1000);
+function epochToDateParts(epochSeconds) {
+  const d = new Date(epochSeconds * 1000);
   return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
 }
 
-async function setWatermark(integrationKey, localTable, epochSeconds) {
+// Reads the committed watermark (if any) and any in-progress, not-yet-
+// finished backfill (if a prior invocation ran out of time mid-table) in
+// one read -- resuming needs both at once.
+async function getSyncState(integrationKey, localTable) {
+  const result = await dynamo.send(
+    new GetItemCommand({
+      TableName: WATERMARKS_TABLE,
+      Key: marshall({ pk: syncStateKey(integrationKey, localTable) }),
+    }),
+  );
+  if (!result.Item) return { lastSyncedAt: null, backfill: null };
+  const item = unmarshall(result.Item);
+  return { lastSyncedAt: item.lastSyncedAt ?? null, backfill: item.backfill ?? null };
+}
+
+// Checkpoints an in-progress backfill's progress WITHOUT touching the
+// committed watermark -- that only ever advances once completeBackfill
+// runs, at the end of the whole chain of invocations for this table.
+// NOTE: backfill.deletedIds is stored as-is in a DynamoDB item (400KB
+// limit) -- fine for the deletion volumes seen so far (a few hundred to a
+// few thousand ids), but a table combining an extreme row count with an
+// extreme deletion rate could theoretically overflow it. Not solved here;
+// would need moving that set out to S3 if it ever comes up.
+async function saveBackfillProgress(integrationKey, localTable, backfill) {
+  await dynamo.send(
+    new UpdateItemCommand({
+      TableName: WATERMARKS_TABLE,
+      Key: marshall({ pk: syncStateKey(integrationKey, localTable) }),
+      UpdateExpression: "SET backfill = :backfill, updatedAt = :now",
+      ExpressionAttributeValues: marshall({
+        ":backfill": backfill,
+        ":now": Math.floor(Date.now() / 1000),
+      }),
+    }),
+  );
+}
+
+// Marks a table's backfill fully done: advances the committed watermark to
+// commitWatermark (fixed once, at the start of the FIRST attempt at this
+// backfill -- see runTableSync) and clears the in-progress state (PutItem
+// replaces the whole item, so omitting `backfill` here removes it) so the
+// next invocation runs a fresh, normally-small incremental sync instead of
+// re-running this backfill again.
+async function completeBackfill(integrationKey, localTable, commitWatermark) {
   await dynamo.send(
     new PutItemCommand({
       TableName: WATERMARKS_TABLE,
       Item: marshall({
-        pk: watermarkKey(integrationKey, localTable),
-        lastSyncedAt: epochSeconds,
+        pk: syncStateKey(integrationKey, localTable),
+        lastSyncedAt: commitWatermark,
         updatedAt: Math.floor(Date.now() / 1000),
       }),
     }),
@@ -287,78 +343,188 @@ const xmlParser = new XMLParser({
   },
 });
 
-// Runs one paginated Read against SPP, returning the raw parsed rows
-// (before field flattening/renaming) -- shared by fetchAllPages and
-// fetchDeletedIds below.
-async function fetchAllPagesRaw({ xmlUrl, apiKey, accessToken, sppType, sppFieldNames, watermark, deletedMode }) {
-  const rawRows = [];
-  let start = 0;
+// Fetches exactly ONE page (up to PAGE_SIZE rows). The building block both
+// resumable phases below drive themselves, checking the remaining time
+// budget between pages -- unlike the old all-in-one-shot loop this
+// replaced, nothing here drains every page in a single uninterruptible
+// call.
+async function fetchOnePage({ xmlUrl, apiKey, accessToken, sppType, sppFieldNames, watermark, start, deletedMode }) {
+  const xml = buildReadXml({ apiKey, accessToken, sppType, sppFieldNames, watermark, start, deletedMode });
 
-  while (true) {
-    const xml = buildReadXml({ apiKey, accessToken, sppType, sppFieldNames, watermark, start, deletedMode });
+  const response = await fetch(xmlUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/xml" },
+    body: xml,
+  });
 
-    const response = await fetch(xmlUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/xml" },
-      body: xml,
-    });
-
-    const responseText = await response.text();
-    if (!response.ok) {
-      throw new Error(`SPP XML request failed [${response.status}]: ${responseText}`);
-    }
-
-    const parsed = xmlParser.parse(responseText);
-    const pageData = parsed?.response?.Read?.[sppType];
-    const pageRows = pageData === undefined ? [] : Array.isArray(pageData) ? pageData : [pageData];
-
-    rawRows.push(...pageRows);
-
-    if (pageRows.length < PAGE_SIZE) break;
-    start += PAGE_SIZE;
+  const responseText = await response.text();
+  if (!response.ok) {
+    throw new Error(`SPP XML request failed [${response.status}]: ${responseText}`);
   }
 
-  return rawRows;
+  const parsed = xmlParser.parse(responseText);
+  const pageData = parsed?.response?.Read?.[sppType];
+  const rows = pageData === undefined ? [] : Array.isArray(pageData) ? pageData : [pageData];
+
+  return { rows, isLastPage: rows.length < PAGE_SIZE };
 }
 
-// Separate query for just the set of deleted ids matching the same
-// watermark -- "deleted" isn't a requestable field value (see
-// DELETED_CSV_FIELD's comment), so this is the only way to know which ids
-// among a changed set are deleted.
-async function fetchDeletedIds({ xmlUrl, apiKey, accessToken, sppType, watermark }) {
-  const rawRows = await fetchAllPagesRaw({
-    xmlUrl, apiKey, accessToken, sppType, watermark,
-    sppFieldNames: ["id"],
-    deletedMode: "deleted-only",
-  });
-  return new Set(rawRows.map((r) => String(r.id)));
+// context is the Lambda invocation's context object (getRemainingTimeInMillis) --
+// absent (e.g. local/manual test scripts calling these directly) means
+// never time-box, run to completion.
+function remainingMs(context) {
+  return context && typeof context.getRemainingTimeInMillis === "function"
+    ? context.getRemainingTimeInMillis()
+    : Infinity;
 }
 
-async function fetchAllPages({ xmlUrl, apiKey, accessToken, sppType, fields, watermark }) {
+// Phase 1 of a table's backfill: collect every deleted id matching the
+// watermark ("deleted" isn't a requestable field value -- see
+// DELETED_CSV_FIELD's comment -- so this is the only way to know which ids
+// among a changed set are deleted). Resumable via state.deletedIdsOffset/
+// state.deletedIds -- typically small and fast (deletions are usually a
+// small fraction of a table), but time-boxed the same way as the
+// field-data phase in case it isn't, for some table.
+async function runDeletedIdsPhase({ xmlUrl, apiKey, accessToken, sppType, watermark, state, context }) {
+  const ids = new Set(state.deletedIds ?? []);
+  let offset = state.deletedIdsOffset ?? 0;
+
+  while (true) {
+    if (remainingMs(context) < BACKFILL_TIME_BUDGET_MS) {
+      return { ids: [...ids], offset, done: false };
+    }
+
+    const { rows, isLastPage } = await fetchOnePage({
+      xmlUrl, apiKey, accessToken, sppType, watermark, start: offset,
+      sppFieldNames: ["id"],
+      deletedMode: "deleted-only",
+    });
+    for (const row of rows) ids.add(String(row.id));
+    offset += PAGE_SIZE;
+
+    if (isLastPage) return { ids: [...ids], offset, done: true };
+  }
+}
+
+// Phase 2: the field-data pages, merged into S3 in batches as they're
+// fetched (MERGE_BATCH_SIZE rows at a time, or whatever's pending once the
+// last page comes in) instead of accumulated entirely in memory and
+// written once at the very end -- so a timeout mid-table loses at most one
+// batch's worth of already-fetched-but-not-yet-merged rows, not the whole
+// table's progress. Resumable via state.fieldOffset.
+async function runFieldDataPhase({ xmlUrl, apiKey, accessToken, sppType, fields, watermark, deletedIds, state, context, connection, company, localTable }) {
   // Dedupe -- several fields can share the same base sppField (e.g.
   // addr.city and addr.state both come from requesting "addr" once), so
   // request each base field from SPP only once regardless of how many
   // csvFields extract pieces from it.
   const sppFieldNames = [...new Set(fields.map((f) => f.sppField))];
 
-  const [rawRows, deletedIds] = await Promise.all([
-    fetchAllPagesRaw({ xmlUrl, apiKey, accessToken, sppType, sppFieldNames, watermark, deletedMode: "both" }),
-    fetchDeletedIds({ xmlUrl, apiKey, accessToken, sppType, watermark }),
-  ]);
+  let offset = state.fieldOffset ?? 0;
+  let pendingBatch = [];
+  let totalMerged = 0;
+  let lastRowsWritten = null;
 
-  const rows = [];
-  for (const rawRow of rawRows) {
-    const csvRow = {};
-    for (const field of fields) {
-      csvRow[field.csvField] = field.subKey
-        ? extractSubFieldValue(rawRow[field.sppField], field.subKey)
-        : flattenFieldValue(rawRow[field.sppField]);
+  const flush = async () => {
+    if (pendingBatch.length === 0) return;
+    const result = await mergeIntoS3Csv(connection, company, localTable, fields, pendingBatch);
+    lastRowsWritten = result.rowsWritten;
+    totalMerged += pendingBatch.length;
+    pendingBatch = [];
+  };
+
+  while (true) {
+    if (remainingMs(context) < BACKFILL_TIME_BUDGET_MS) {
+      await flush();
+      return { offset, done: false, totalMerged, rowsWritten: lastRowsWritten };
     }
-    csvRow[DELETED_CSV_FIELD] = deletedIds.has(String(rawRow.id)) ? "1" : "0";
-    rows.push(csvRow);
+
+    const { rows: rawRows, isLastPage } = await fetchOnePage({
+      xmlUrl, apiKey, accessToken, sppType, watermark, start: offset,
+      sppFieldNames,
+      deletedMode: "both",
+    });
+
+    for (const rawRow of rawRows) {
+      const csvRow = {};
+      for (const field of fields) {
+        csvRow[field.csvField] = field.subKey
+          ? extractSubFieldValue(rawRow[field.sppField], field.subKey)
+          : flattenFieldValue(rawRow[field.sppField]);
+      }
+      csvRow[DELETED_CSV_FIELD] = deletedIds.has(String(rawRow.id)) ? "1" : "0";
+      pendingBatch.push(csvRow);
+    }
+    offset += PAGE_SIZE;
+
+    if (pendingBatch.length >= MERGE_BATCH_SIZE || isLastPage) {
+      await flush();
+    }
+
+    if (isLastPage) {
+      if (lastRowsWritten === null) {
+        // Nothing was ever merged this run (e.g. genuinely zero changed
+        // rows) -- still need the current total for reporting.
+        const result = await mergeIntoS3Csv(connection, company, localTable, fields, []);
+        lastRowsWritten = result.rowsWritten;
+      }
+      return { offset, done: true, totalMerged, rowsWritten: lastRowsWritten };
+    }
+  }
+}
+
+// Runs (or resumes) one table's full sync end to end. A table's backfill
+// can span multiple Lambda invocations -- progress is checkpointed to
+// DynamoDB between phases/batches (see saveBackfillProgress), so
+// re-invoking with the same integrationKey/company/table just continues
+// rather than restarting from scratch. Returns:
+//   { status: "complete", rowsThisRun, rowsWritten }
+//   { status: "partial", phase: "deletedIds" | "fieldData", rowsThisRun }
+async function runTableSync({ xmlUrl, apiKey, accessToken, integrationKey, company, localTable, tableConfig, connection, context }) {
+  const { lastSyncedAt, backfill: existingBackfill } = await getSyncState(integrationKey, localTable);
+  const watermark = lastSyncedAt != null ? epochToDateParts(lastSyncedAt) : EPOCH_START;
+
+  const backfill = existingBackfill ?? {
+    // Fixed once, at the start of the FIRST attempt at this backfill --
+    // reused on every resume, same as `watermark` above (read from
+    // lastSyncedAt, which isn't touched until completeBackfill), so a page
+    // offset always means the same thing across the whole chain of
+    // invocations for this table.
+    commitWatermark: Math.floor(Date.now() / 1000),
+    deletedIds: [],
+    deletedIdsOffset: 0,
+    deletedIdsDone: false,
+    fieldOffset: 0,
+  };
+
+  if (!backfill.deletedIdsDone) {
+    const result = await runDeletedIdsPhase({
+      xmlUrl, apiKey, accessToken, sppType: tableConfig.sppType, watermark,
+      state: backfill, context,
+    });
+    backfill.deletedIds = result.ids;
+    backfill.deletedIdsOffset = result.offset;
+    backfill.deletedIdsDone = result.done;
+
+    if (!result.done) {
+      await saveBackfillProgress(integrationKey, localTable, backfill);
+      return { status: "partial", phase: "deletedIds", rowsThisRun: 0 };
+    }
   }
 
-  return rows;
+  const fieldResult = await runFieldDataPhase({
+    xmlUrl, apiKey, accessToken, sppType: tableConfig.sppType, fields: tableConfig.fields, watermark,
+    deletedIds: new Set(backfill.deletedIds),
+    state: backfill, context, connection, company, localTable,
+  });
+  backfill.fieldOffset = fieldResult.offset;
+
+  if (!fieldResult.done) {
+    await saveBackfillProgress(integrationKey, localTable, backfill);
+    return { status: "partial", phase: "fieldData", rowsThisRun: fieldResult.totalMerged };
+  }
+
+  await completeBackfill(integrationKey, localTable, backfill.commitWatermark);
+  return { status: "complete", rowsThisRun: fieldResult.totalMerged, rowsWritten: fieldResult.rowsWritten };
 }
 
 // --- Merge into S3 (DuckDB-based upsert by id) -----------------------------
@@ -383,7 +549,7 @@ async function mergeIntoS3Csv(connection, company, localTable, fields, newRows) 
   }
 
   // fields lists only real SPP-requestable fields -- "deleted" is synthetic
-  // (populated by fetchAllPages via a separate deleted-ids query, see
+  // (populated by runFieldDataPhase via a separate deleted-ids query, see
   // DELETED_CSV_FIELD's comment) and isn't in that list, so it's added here.
   const columns = [...fields.map((f) => f.csvField), DELETED_CSV_FIELD];
   // Everything cast to VARCHAR at this layer -- existing_data (read via
@@ -466,7 +632,7 @@ async function mergeIntoS3Csv(connection, company, localTable, fields, newRows) 
 
 // --- Handler ----------------------------------------------------------
 
-exports.handler = async (event) => {
+exports.handler = async (event, context) => {
   const {
     integrationKey, // e.g. "spp-top step-prod" -- picks the exact oauth_config/oauth_tokens row. Not derived from `company` -- see the README note on why.
     instance, // "sandbox" | "production" -- picks which SPP XML endpoint/API key to use
@@ -491,7 +657,6 @@ exports.handler = async (event) => {
   }
 
   const region = process.env.AWS_REGION || "us-east-2";
-  const runStartedAt = Math.floor(Date.now() / 1000);
 
   const [apiKey, xmlUrl, { getValidAccessToken }] = await Promise.all([
     getSsmParam(`${ssmParamPrefix}/${instance === "sandbox" ? "sandboxKey" : "productionKey"}`),
@@ -505,6 +670,7 @@ exports.handler = async (event) => {
 
   const tablesToRun = table ? [table] : Object.keys(masterConfig);
   const succeeded = [];
+  const partial = [];
   const failed = [];
 
   for (const localTable of tablesToRun) {
@@ -515,41 +681,36 @@ exports.handler = async (event) => {
     }
 
     try {
-      const watermark = await getWatermark(integrationKey, localTable);
-
-      const rows = await fetchAllPages({
-        xmlUrl,
-        apiKey,
-        accessToken,
-        sppType: tableConfig.sppType,
-        fields: tableConfig.fields,
-        watermark,
+      const result = await runTableSync({
+        xmlUrl, apiKey, accessToken, integrationKey, company, localTable, tableConfig, connection, context,
       });
 
-      const { rowsWritten, wasFirstLoad } = await mergeIntoS3Csv(
-        connection,
-        company,
-        localTable,
-        tableConfig.fields,
-        rows,
-      );
-
-      await setWatermark(integrationKey, localTable, runStartedAt);
-
-      succeeded.push({ table: localTable, newOrChangedRows: rows.length, totalRowsAfterMerge: rowsWritten, wasFirstLoad });
-      console.log(`[sppDataSync] "${localTable}": ${rows.length} new/changed rows, ${rowsWritten} total after merge`);
+      if (result.status === "complete") {
+        succeeded.push({ table: localTable, newOrChangedRows: result.rowsThisRun, totalRowsAfterMerge: result.rowsWritten });
+        console.log(`[sppDataSync] "${localTable}": complete -- ${result.rowsThisRun} new/changed rows this run, ${result.rowsWritten} total after merge`);
+      } else {
+        partial.push({ table: localTable, phase: result.phase, rowsMergedThisRun: result.rowsThisRun });
+        console.log(`[sppDataSync] "${localTable}": partial (ran out of time during ${result.phase}) -- ${result.rowsThisRun} rows merged this run; re-invoke the same request to continue`);
+        // Out of time for this table means there's essentially no time
+        // left for any remaining tables in this invocation either --
+        // stop here rather than let every subsequent table fail the same
+        // way for the same reason. Whatever's left in tablesToRun just
+        // gets picked up on the next invocation.
+        break;
+      }
     } catch (error) {
       console.error(`[sppDataSync] "${localTable}" failed:`, error);
       failed.push({ table: localTable, error: error.message });
       // Deliberately not re-thrown -- one bad table shouldn't abort the
-      // rest of the run, and its watermark is left untouched so the next
-      // run retries from the same point.
+      // rest of the run. Any backfill progress already checkpointed for
+      // this table is untouched by this catch, so the next attempt
+      // resumes from there rather than restarting from scratch.
     }
   }
 
   return {
-    statusCode: failed.length > 0 && succeeded.length === 0 ? 500 : 200,
-    body: { succeeded, failed },
+    statusCode: failed.length > 0 && succeeded.length === 0 && partial.length === 0 ? 500 : 200,
+    body: { succeeded, partial, failed },
   };
 };
 
@@ -561,12 +722,15 @@ exports._internal = {
   buildReadXml,
   flattenFieldValue,
   extractSubFieldValue,
-  fetchAllPagesRaw,
-  fetchDeletedIds,
-  fetchAllPages,
+  fetchOnePage,
+  runDeletedIdsPhase,
+  runFieldDataPhase,
+  runTableSync,
   mergeIntoS3Csv,
   readMasterConfig,
-  getWatermark,
-  setWatermark,
+  getSyncState,
+  saveBackfillProgress,
+  completeBackfill,
+  epochToDateParts,
   setupDuckDB,
 };

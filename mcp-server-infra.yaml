@@ -7,12 +7,28 @@ Description: >
   Lambda itself and the DCR-shim rationale.
 
 Parameters:
+  ResourceSuffix:
+    Type: String
+    Default: ""
+    Description: >
+      Appended to every named resource in this stack (e.g. "-acme" ->
+      "sppMcpServer-acme") -- lets a second customer deploy this same
+      template as its own stack without colliding with an existing one
+      (FunctionName, DynamoDB TableName, and EventBridge Rule Name all have
+      to be unique per AWS account/region, and would otherwise fail to
+      create). Left empty for TopStep's own stack, which keeps the original
+      unsuffixed names exactly as they are today -- changing this on an
+      EXISTING stack renames (replaces) its resources, so never set this on
+      a redeploy of an already-running customer's stack, only at first
+      creation.
+
   CognitoDomainPrefix:
     Type: String
-    Default: topstep-spp-mcp
     Description: >
-      Must be globally unique across all AWS accounts using Cognito prefix
-      domains. Hosted UI will be served at
+      REQUIRED, no default on purpose -- must be globally unique across
+      ALL AWS accounts using Cognito prefix domains, not just this one, so
+      a shared default would only work for the first stack that claims it.
+      Hosted UI will be served at
       https://<this>.auth.<region>.amazoncognito.com
 
   ClaudeRedirectUri:
@@ -50,18 +66,40 @@ Parameters:
 
   SppInstanceName:
     Type: String
-    Default: top-step
+    Description: >
+      REQUIRED, no default on purpose -- this is the S3 company folder
+      (spp-data/{this}/...) the Lambda reads REPORT_VIEWS from, via
+      aiQueryReports/index.js's own SPP_INSTANCE_NAME lookup (reused
+      unmodified in this stack). A shared default would mean a new
+      customer's stack silently reads TopStep's own SPP data if this is
+      ever left unset, rather than failing loudly. Pass "top-step" for
+      TopStep's own stack.
 
   TermsTableName:
     Type: String
     Default: aiTerms
+    Description: >
+      NOTE: this table isn't created by any CloudFormation template in
+      this repo (grep the repo for "aiTerms" -- this Parameter's default
+      is the only reference) -- confirm it actually exists and how it was
+      provisioned before relying on it, and give a new customer their own
+      table here rather than reusing "aiTerms" as-is: it's a flat
+      {term: definition} store with no per-customer partitioning, so two
+      customers sharing it would see and could overwrite each other's
+      terminology definitions.
 
   SppBaseOAuthConfigKey:
     Type: String
-    Default: "spp-top step-prod"
     Description: >
-      The existing oauth_config row (client_id/secret/urls/scope) that
-      per-user SPP connections clone -- see ai/mcpServer/sppUserAuth.js.
+      REQUIRED, no default on purpose -- the existing oauth_config row
+      (client_id/secret/urls/scope) that per-user SPP connections clone,
+      see ai/mcpServer/sppUserAuth.js. This has to point at a base app
+      registration made within THAT customer's own SPP instance (a
+      different SPP tenant needs its own OAuth app, registered by whoever
+      administers that customer's SPP account) -- a shared default would
+      mean a new customer's users end up cloning TopStep's own SPP OAuth
+      app and silently connecting to TopStep's SPP tenant instead of
+      theirs. Pass "spp-top step-prod" for TopStep's own stack.
 
 Resources:
   # -------------------------------------------------------
@@ -72,7 +110,7 @@ Resources:
   SppMcpUserPool:
     Type: AWS::Cognito::UserPool
     Properties:
-      UserPoolName: spp-mcp-users
+      UserPoolName: !Sub "spp-mcp-users${ResourceSuffix}"
       AdminCreateUserConfig:
         AllowAdminCreateUserOnly: true # no public sign-up -- accounts are admin-provisioned
       Policies:
@@ -116,7 +154,7 @@ Resources:
   SppMcpServerFunction:
     Type: AWS::Lambda::Function
     Properties:
-      FunctionName: sppMcpServer
+      FunctionName: !Sub "sppMcpServer${ResourceSuffix}"
       PackageType: Image
       Code:
         ImageUri: !Ref McpServerImageUri
@@ -157,7 +195,7 @@ Resources:
   SppMcpApi:
     Type: AWS::ApiGatewayV2::Api
     Properties:
-      Name: spp-mcp-server
+      Name: !Sub "spp-mcp-server${ResourceSuffix}"
       ProtocolType: HTTP
 
   SppMcpApiIntegration:
@@ -238,7 +276,7 @@ Resources:
   SppFilterCacheTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: sppFilterCache
+      TableName: !Sub "sppFilterCache${ResourceSuffix}"
       BillingMode: PAY_PER_REQUEST
       SSESpecification:
         SSEEnabled: true
@@ -252,7 +290,7 @@ Resources:
   SppFilterCacheRefreshRule:
     Type: AWS::Events::Rule
     Properties:
-      Name: spp-filter-cache-refresh
+      Name: !Sub "spp-filter-cache-refresh${ResourceSuffix}"
       ScheduleExpression: "rate(6 hours)"
       State: ENABLED
       Targets:

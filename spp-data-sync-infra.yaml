@@ -20,11 +20,38 @@ Parameters:
       Reuses the same execution role already used by every other Lambda in
       this project (CloudWatch Logs, S3, DynamoDB, SSM access).
 
+  ResourceSuffix:
+    Type: String
+    Default: ""
+    Description: >
+      Appended to every resource name in this stack (e.g. "-acme" ->
+      "sppDataSync-acme") -- lets a second customer deploy this same
+      template as its own stack without colliding with an existing one.
+      Left empty for TopStep's own stack, which keeps the original
+      unsuffixed names ("sppDataSync", "sppSyncWatermarks") exactly as they
+      are today -- changing this on an EXISTING stack renames (replaces)
+      its Lambda and DynamoDB table, so never set this on a redeploy of an
+      already-running customer's stack, only at first creation.
+
+  SSMParamPrefix:
+    Type: String
+    Default: /spp/top-step
+    Description: >
+      REQUIRED -- SSM Parameter Store path prefix this customer's SPP API
+      key/XML URL live under (expects {prefix}/sandboxKey,
+      {prefix}/productionKey, {prefix}/sandboxXMLURL,
+      {prefix}/productionXMLURL to already exist -- this stack doesn't
+      create them). Deliberately has no implicit code-level fallback (see
+      sppDataSync.js) -- every customer, including this default for
+      TopStep's own stack, must set this explicitly so a misconfigured
+      deployment fails loudly instead of silently reading another
+      customer's SPP credentials.
+
 Resources:
   SppSyncWatermarksTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: sppSyncWatermarks
+      TableName: !Sub "sppSyncWatermarks${ResourceSuffix}"
       BillingMode: PAY_PER_REQUEST
       SSESpecification:
         SSEEnabled: true
@@ -38,7 +65,7 @@ Resources:
   SppDataSyncFunction:
     Type: AWS::Lambda::Function
     Properties:
-      FunctionName: sppDataSync
+      FunctionName: !Sub "sppDataSync${ResourceSuffix}"
       PackageType: Image
       Code:
         ImageUri: !Ref SppDataSyncImageUri
@@ -55,6 +82,7 @@ Resources:
       Environment:
         Variables:
           WATERMARKS_TABLE: !Ref SppSyncWatermarksTable
+          SSM_PARAM_PREFIX: !Ref SSMParamPrefix
 
 Outputs:
   FunctionName:

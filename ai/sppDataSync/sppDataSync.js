@@ -268,7 +268,24 @@ function extractSubFieldValue(value, subKey) {
   return JSON.stringify(raw);
 }
 
-const xmlParser = new XMLParser();
+// fast-xml-parser caps total XML entity expansions (&amp;, &lt;, etc.) per
+// document at 1000 by default -- an anti-DoS protection meant for parsing
+// untrusted XML. SPP is an authenticated, trusted source, not arbitrary
+// attacker input, and a single page can legitimately contain far more than
+// that: up to 1000 records per page (PAGE_SIZE), and rich-text fields like
+// Issue.description/notes are full of &amp;/&lt;/&gt; entities -- confirmed
+// hitting this exact default ("Entity expansion limit exceeded: 1009 >
+// 1000") syncing the "issue" table. maxExpandedLength (total expanded
+// content length, default 100,000 chars) is the next limit a large page of
+// rich text would hit right after -- raised together rather than one at a
+// time. maxEntitySize/maxExpansionDepth only apply to custom DTD-declared
+// entities, which SPP's XML never uses, so they're left at their defaults.
+const xmlParser = new XMLParser({
+  processEntities: {
+    maxTotalExpansions: 1_000_000,
+    maxExpandedLength: 50_000_000,
+  },
+});
 
 // Runs one paginated Read against SPP, returning the raw parsed rows
 // (before field flattening/renaming) -- shared by fetchAllPages and
@@ -461,12 +478,24 @@ exports.handler = async (event) => {
     return { statusCode: 400, body: { error: "integrationKey, instance, and company are required" } };
   }
 
+  // Required, no default -- one dedicated sppDataSync deployment per
+  // customer (see the infra template), each pointed at that customer's own
+  // SSM parameters via this prefix. A fallback default here would mean a
+  // deployment that's missing this env var silently reads WHOEVER the
+  // default pointed at's SPP credentials instead of erroring -- for a
+  // multi-customer setup that's a silent cross-tenant credential leak, not
+  // a convenience worth having.
+  const ssmParamPrefix = process.env.SSM_PARAM_PREFIX;
+  if (!ssmParamPrefix) {
+    return { statusCode: 500, body: { error: "SSM_PARAM_PREFIX environment variable is not set on this Lambda" } };
+  }
+
   const region = process.env.AWS_REGION || "us-east-2";
   const runStartedAt = Math.floor(Date.now() / 1000);
 
   const [apiKey, xmlUrl, { getValidAccessToken }] = await Promise.all([
-    getSsmParam(instance === "sandbox" ? "/spp/sandboxKey" : "/spp/productionKey"),
-    getSsmParam(instance === "sandbox" ? "/spp/sandboxXMLURL" : "/spp/productionXMLURL"),
+    getSsmParam(`${ssmParamPrefix}/${instance === "sandbox" ? "sandboxKey" : "productionKey"}`),
+    getSsmParam(`${ssmParamPrefix}/${instance === "sandbox" ? "sandboxXMLURL" : "productionXMLURL"}`),
     import("./oauthUtils.mjs"),
   ]);
   const accessToken = await getValidAccessToken(integrationKey);

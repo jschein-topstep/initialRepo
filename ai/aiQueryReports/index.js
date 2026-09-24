@@ -509,8 +509,42 @@ async function getNonEmptyPaths(paths) {
   return nonEmpty.length > 0 ? nonEmpty : paths;
 }
 
+// Returns the list of viewNames that failed to materialize (empty if all
+// succeeded). Each table is isolated in its own try/catch -- one missing or
+// malformed S3 file must not take down every OTHER table along with it.
+// Confirmed happening in production: referencing a not-yet-synced table's
+// file in REPORT_VIEWS threw on the very first table processed, aborting
+// the whole loop and breaking every table, including 20+ that were working
+// fine moments earlier. A failed table is simply never CREATEd (or, on a
+// warm re-materialize, keeps whatever it had before -- CREATE OR REPLACE
+// never runs, so the prior version isn't touched) -- getSchema separately
+// skips any view that isn't actually queryable, so a broken table doesn't
+// show up as available either.
 async function materializeTables(connection, viewNames) {
+  const failedViewNames = [];
+
   for (const viewName of viewNames) {
+    try {
+      await materializeOneTable(connection, viewName);
+    } catch (error) {
+      failedViewNames.push(viewName);
+      console.error(
+        `Failed to materialize "${viewName}" -- skipping it, other tables are unaffected: ${error.message}`,
+      );
+    }
+  }
+
+  if (failedViewNames.length > 0) {
+    console.error(
+      `materializeTables: ${failedViewNames.length} of ${viewNames.length} table(s) failed: ${failedViewNames.join(", ")}`,
+    );
+  }
+
+  return failedViewNames;
+}
+
+async function materializeOneTable(connection, viewName) {
+  {
     const s3Paths = REPORT_VIEWS[viewName];
     const allPaths = Array.isArray(s3Paths) ? s3Paths : [s3Paths];
     const paths = await getNonEmptyPaths(allPaths);
@@ -642,8 +676,11 @@ async function setupConnection(region, timings) {
     );
 
     const t1 = Date.now();
-    await materializeTables(cachedConnection, changedTables);
+    const failedViewNames = await materializeTables(cachedConnection, changedTables);
     timings.rematerializeMs = Date.now() - t1;
+    if (failedViewNames.length > 0) {
+      timings.materializeFailures = failedViewNames;
+    }
 
     lastManifest = currentManifest;
     cachedSchema = null; // invalidate -- recomputed lazily on next getSchemas call
@@ -678,8 +715,11 @@ async function setupConnection(region, timings) {
   // bundled in the image -- worth vendoring them into the Docker image.
 
   const t2 = Date.now();
-  await materializeTables(connection, Object.keys(REPORT_VIEWS));
+  const failedViewNames = await materializeTables(connection, Object.keys(REPORT_VIEWS));
   timings.materializeAllMs = Date.now() - t2;
+  if (failedViewNames.length > 0) {
+    timings.materializeFailures = failedViewNames;
+  }
 
   lastManifest = await getCurrentManifest();
   lastStalenessCheckAt = Date.now();
@@ -733,7 +773,16 @@ async function getSchema(connection, timings) {
   const t0 = Date.now();
   const schema = {};
   for (const viewName of Object.keys(REPORT_VIEWS)) {
-    schema[viewName] = await getTableSchema(connection, viewName);
+    try {
+      schema[viewName] = await getTableSchema(connection, viewName);
+    } catch (error) {
+      // A view that failed to materialize (see materializeTables) was
+      // never actually CREATEd, so introspecting it throws -- omit it from
+      // the schema entirely rather than letting one broken table crash
+      // getSchemas for every OTHER table too. The agent simply won't know
+      // this table exists, same as if it weren't in REPORT_VIEWS at all.
+      console.error(`Omitting "${viewName}" from schema -- not queryable: ${error.message}`);
+    }
   }
   timings.schemaComputeMs = Date.now() - t0;
   timings.schemaSource = "computed";

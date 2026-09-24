@@ -1,3 +1,11 @@
+// =============================================================================
+// NOTE (9/21): We were asked to remove the SharePoint/Teams "Team" logic for
+// now. All Team-related code (Team rename/property updates, Team owner
+// add/remove, and the AAD user lookup used for the owner swap) has been
+// COMMENTED OUT rather than deleted, in case we need it again.
+// Search for "TEAM LOGIC DISABLED" to find every spot that was changed.
+// =============================================================================
+
 import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
 
 const lambdaClient = new LambdaClient({ region: "us-east-2" });
@@ -21,8 +29,9 @@ const SITE_PATH_BY_DIVISION = {
 };
 
 // Retrieve projects from SPP read (passed via lambda function call).
-// This Lambda now only handles updates to EXISTING SharePoint folders/Teams —
+// This Lambda now only handles updates to EXISTING SharePoint folders —
 // new-project folder creation is handled elsewhere.
+// (TEAM LOGIC DISABLED 9/21 — previously also updated existing Teams.)
 export const handler = async (event) => {
   const bodyJSON = JSON.parse(event.body);
   console.log(`bodyJSON: ${JSON.stringify(bodyJSON)}`);
@@ -128,8 +137,9 @@ async function updateFolderMetadata(token, driveId, itemId, columns) {
 }
 
 // ---------------------------------------------------------------------------
-// UPDATE PATH — keeps the SharePoint folder + Team in sync when SPP data changes
+// UPDATE PATH — keeps the SharePoint folder in sync when SPP data changes
 // (Loop B: "existing project changed" branch)
+// (TEAM LOGIC DISABLED 9/21 — previously also kept the Team in sync.)
 // ---------------------------------------------------------------------------
 
 // Resolves { siteId, driveId } for a project's division. Throws (rather than
@@ -183,6 +193,11 @@ async function renameFolder(token, driveId, itemId, newName) {
   return data;
 }
 
+// =============================================================================
+// TEAM LOGIC DISABLED (9/21) — Team property updates + owner add/remove.
+// Uncomment to restore.
+// =============================================================================
+/*
 // Updates displayName/description on an existing Team (teamId == the underlying group id)
 async function updateTeamProperties(
   token,
@@ -256,10 +271,13 @@ async function removeTeamOwner(token, teamId, userId) {
     `Owner ${userId} removed from team ${teamId} (or already wasn't one)`,
   );
 }
+*/
 
-// Updates the SharePoint parent folder + Team for a project that changed in SPP.
-// Handles: name change (folder rename + Team rename), owner/coordinator change
-// (folder metadata refresh + Team owner swap).
+// Updates the SharePoint parent folder for a project that changed in SPP.
+// Handles: name change (folder rename), owner/coordinator change (folder
+// metadata refresh).
+// (TEAM LOGIC DISABLED 9/21 — previously also renamed the Team and swapped
+// Team owners on owner change.)
 //
 // NOT handled here: a division change, since that means a different SharePoint
 // site entirely — that should go through a dedicated move/recreate flow rather
@@ -341,6 +359,7 @@ async function updateSharepointForProject(project, token) {
       `Graph response fields for "${project.name}": ${JSON.stringify(patchResult)}`,
     );
 
+    // TEAM LOGIC DISABLED (9/21) — Team rename / owner-swap block.
     // ...team_id block unchanged...
 
     return { project: project.name, updated: true };
@@ -378,6 +397,11 @@ async function getGraphToken() {
   return data.access_token;
 }
 
+// =============================================================================
+// TEAM LOGIC DISABLED (9/21) — AAD user lookup, only used by the Team
+// owner-swap block. Uncomment along with addTeamOwner/removeTeamOwner.
+// =============================================================================
+/*
 // Currently unused (owner-swap block that calls this is commented out in
 // updateSharepointForProject), kept in case that logic is re-enabled.
 async function getUserId(token, upnOrEmail) {
@@ -398,6 +422,7 @@ async function getUserId(token, upnOrEmail) {
   console.log(`Resolved user: ${data.userPrincipalName} -> id: ${data.id}`);
   return data.id;
 }
+*/
 
 // Builds the division-specific metadata columns object for the folder PATCH.
 function buildDivisionMetadataColumns(project, division) {

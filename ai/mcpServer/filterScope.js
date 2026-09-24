@@ -56,7 +56,21 @@ async function applyFilterScope(connection, email) {
 
   for (const recordType of SCOPED_RECORD_TYPES) {
     const idsSql = idsListSql(cached?.[recordType]);
-    const whereClause = idsSql ? `id IN (${idsSql})` : "FALSE";
+    const permittedClause = idsSql ? `id IN (${idsSql})` : "FALSE";
+    // Generic/service SPP user accounts (templates like "NewHire1-June",
+    // not real people) are unconditionally excluded from SPP's own
+    // filter-set-scoped REST API response, regardless of whose filter set
+    // is applied -- confirmed empirically (0 of 36 generic users ever
+    // appear, for every account checked), so fetchPermittedIds can never
+    // include them no matter how broad someone's access is. There's no
+    // real access-control reason to hide them (they're not anyone's
+    // private data), so "users" always shows them alongside whatever's
+    // permitted, bypassing the fail-closed permitted-IDs check just for
+    // this flag.
+    const whereClause =
+      recordType === "users"
+        ? `(${permittedClause} OR CAST(generic AS VARCHAR) = '1')`
+        : permittedClause;
     await connection.run(
       `CREATE OR REPLACE VIEW "${recordType}" AS SELECT * FROM "${recordType}_raw" WHERE ${whereClause}`,
     );

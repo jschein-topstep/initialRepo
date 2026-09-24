@@ -5,6 +5,13 @@
 
 // deploy.ps1, buildspec.yml, and Dockerfile are included at the bottom of this file for reference.
 
+// To redeploy sppMcpServer:
+//docker buildx build --platform linux/amd64 --provenance=false --output=type=docker -f ai/mcpServer/Dockerfile -t spp-mcp-server . 2>&1 | tail -10 && \
+// docker tag spp-mcp-server:latest 776528084998.dkr.ecr.us-east-2.amazonaws.com/spp-mcp-server:latest && \
+// docker push 776528084998.dkr.ecr.us-east-2.amazonaws.com/spp-mcp-server:latest 2>&1 | tail -5 && \
+// aws lambda update-function-code --function-name sppMcpServer --image-uri 776528084998.dkr.ecr.us-east-2.amazonaws.com/spp-mcp-server:latest --region us-east-2 --query "LastUpdateStatus" --output text && \
+// aws lambda wait function-updated --function-name sppMcpServer --region us-east-2 && echo "sppMcpServer updated"
+
 const { DuckDBInstance } = require("@duckdb/node-api");
 const { S3Client, HeadObjectCommand } = require("@aws-sdk/client-s3");
 const Anthropic = require("@anthropic-ai/sdk");
@@ -17,54 +24,48 @@ const DATA_PREFIX = "spp-data";
 const basePath = `s3://${BUCKET}/${DATA_PREFIX}/${instanceName}`;
 console.log("basePath: " + basePath);
 
+// Cut over from Celigo's recent/historical split files to sppDataSync's
+// single incrementally-merged file per table (spp-data/{company}/sync/). A
+// single-path entry gets a one-branch UNION ALL downstream -- functionally
+// a no-op vs. the old two-path arrays, so nothing else needed to change to
+// support this. Every one of these files carries a synthetic "deleted"
+// column (see sppDataSync.js) that the old recent/historical files never
+// had -- materializeTables strips it out (both the rows and the column
+// itself), matching the old files' behavior of never containing deleted
+// records at all.
 const REPORT_VIEWS = {
-  booking: [
-    `${basePath}/recent/booking.csv`,
-    `${basePath}/historical/booking.csv`,
-  ],
-  charges: [`${basePath}/recent/slip.csv`, `${basePath}/historical/slip.csv`],
-  customers: [
-    `${basePath}/recent/customer.csv`,
-    `${basePath}/historical/customer.csv`,
-  ],
-  expenseReports: [
-    `${basePath}/recent/envelope.csv`,
-    `${basePath}/historical/envelope.csv`,
-  ],
-  invoices: [
-    `${basePath}/recent/invoice.csv`,
-    `${basePath}/historical/invoice.csv`,
-  ],
-  projectBillingRules: [
-    `${basePath}/recent/project_billing_rule.csv`,
-    `${basePath}/historical/project_billing_rule.csv`,
-  ],
+  booking: `${basePath}/sync/booking.csv`,
+  charges: `${basePath}/sync/slip.csv`,
+  customers: `${basePath}/sync/customer.csv`,
+  expenseReports: `${basePath}/sync/envelope.csv`,
+  invoices: `${basePath}/sync/invoice.csv`,
+  projectBillingRules: `${basePath}/sync/project_billing_rule.csv`,
   //projectMetrics: `${basePath}/ANALYSIS__transactions_by_Project_User_report_pivot.csv`,
-  projects: [
-    `${basePath}/recent/project.csv`,
-    `${basePath}/historical/project.csv`,
-  ],
-  projectStages: [
-    `${basePath}/recent/project_stage.csv`,
-    `${basePath}/historical/project_stage.csv`,
-  ],
-  receipts: [
-    `${basePath}/recent/ticket.csv`,
-    `${basePath}/historical/ticket.csv`,
-  ],
-  tasks: [
-    `${basePath}/recent/project_task.csv`,
-    `${basePath}/historical/project_task.csv`,
-  ],
-  timeEntries: [
-    `${basePath}/recent/task.csv`,
-    `${basePath}/historical/task.csv`,
-  ],
-  timesheets: [
-    `${basePath}/recent/timesheet.csv`,
-    `${basePath}/historical/timesheet.csv`,
-  ],
-  users: [`${basePath}/recent/user.csv`, `${basePath}/historical/user.csv`],
+  projects: `${basePath}/sync/project.csv`,
+  projectStages: `${basePath}/sync/project_stage.csv`,
+  receipts: `${basePath}/sync/ticket.csv`,
+  tasks: `${basePath}/sync/project_task.csv`,
+  timeEntries: `${basePath}/sync/task.csv`,
+  timesheets: `${basePath}/sync/timesheet.csv`,
+  users: `${basePath}/sync/user.csv`,
+  bookingTypes: `${basePath}/sync/booking_type.csv`,
+  budgets: `${basePath}/sync/budget.csv`,
+  categories: `${basePath}/sync/category.csv`,
+  additionalTeams: `${basePath}/sync/category_1.csv`,
+  costCenters: `${basePath}/sync/cost_center.csv`,
+  customerPOs: `${basePath}/sync/customer_po.csv`,
+  customerPoProjectLinks: `${basePath}/sync/customer_po_to_project.csv`,
+  departments: `${basePath}/sync/department.csv`,
+  items: `${basePath}/sync/item.csv`,
+  jobCodes: `${basePath}/sync/job_code.csv`,
+  projectTaskAssignments: `${basePath}/sync/project_task_assignment.csv`,
+  revenueRecognitionRules: `${basePath}/sync/revenue_recognition_rule.csv`,
+  revenueRecognitionTransactions: `${basePath}/sync/revenue_recognition_transaction.csv`,
+  scriptRequests: `${basePath}/sync/issue.csv`,
+  subrecordCategories: `${basePath}/sync/issue_category.csv`,
+  scriptRequestPriority: `${basePath}/sync/issue_severity.csv`,
+  scriptType: `${basePath}/sync/issue_source.csv`,
+  scriptRequestStage: `${basePath}/sync/issue_stage.csv`,
 };
 
 // One JSON file per table, e.g.:
@@ -107,6 +108,31 @@ const DATE_COLUMNS_COMMON = {
   projectBillingRules: ["created", "updated"],
   receipts: ["date", "created", "updated"],
   timesheets: ["starts", "ends", "created", "updated"],
+  bookingTypes: ["created", "updated"],
+  budgets: ["date", "created", "updated"],
+  categories: ["created", "updated"],
+  additionalTeams: ["created", "updated"],
+  costCenters: ["created", "updated"],
+  customerPOs: ["date", "created", "updated"],
+  customerPoProjectLinks: ["created", "updated"],
+  departments: ["created", "updated"],
+  items: ["created", "updated"],
+  jobCodes: ["created", "updated"],
+  projectTaskAssignments: ["created", "updated"],
+  revenueRecognitionRules: ["start_date", "end_date", "created", "updated"],
+  revenueRecognitionTransactions: ["date", "created", "updated"],
+  scriptRequests: [
+    "date",
+    "date_resolution_expected",
+    "date_resolution_required",
+    "date_resolved",
+    "created",
+    "updated",
+  ],
+  subrecordCategories: ["created", "updated"],
+  scriptRequestPriority: ["created", "updated"],
+  scriptType: ["created", "updated"],
+  scriptRequestStage: ["created", "updated"],
 };
 
 // Custom fields (custom_NNN) are configured per SPP instance -- a column
@@ -114,11 +140,15 @@ const DATE_COLUMNS_COMMON = {
 // entry here per instanceName as each tenant's custom date fields are
 // identified, rather than assuming they're universal (that assumption is
 // what broke when a second tenant's users table had no custom_208 column).
+//
+// "top-step" has no custom_208 entry here (unlike "top-step-sandbox") as of
+// the sppDataSync cutover -- its master.csv doesn't request that field, so
+// it's not a column in the synced user.csv at all, and read_csv_auto's
+// types={} override hard-errors on a column name that doesn't exist in the
+// file (breaking the WHOLE users table, not just that column). Add it back
+// here if it's ever added to the master.csv.
 const DATE_COLUMNS_BY_INSTANCE = {
   "top-step-sandbox": {
-    users: ["custom_208"],
-  },
-  "top-step": {
     users: ["custom_208"],
   },
   // "triton": { /* add triton-specific custom date columns here if any */ },
@@ -176,6 +206,89 @@ const RELATIONSHIPS = {
   "timeEntries.project_task_id": { table: "tasks", column: "id" },
   "timeEntries.user_id": { table: "users", column: "id" },
   "timesheets.user_id": { table: "users", column: "id" },
+  "budgets.category_id": { table: "categories", column: "id" },
+  "budgets.customer_id": { table: "customers", column: "id" },
+  "budgets.project_id": { table: "projects", column: "id" },
+  "categories.cost_center_id": { table: "costCenters", column: "id" },
+  "customerPOs.customer_id": { table: "customers", column: "id" },
+  "customerPoProjectLinks.customer_po_id": {
+    table: "customerPOs",
+    column: "id",
+  },
+  "customerPoProjectLinks.project_id": { table: "projects", column: "id" },
+  "departments.user_id": { table: "users", column: "id" },
+  "items.cost_center_id": { table: "costCenters", column: "id" },
+  "projectTaskAssignments.job_code_id": { table: "jobCodes", column: "id" },
+  "projectTaskAssignments.project_task_id": { table: "tasks", column: "id" },
+  "projectTaskAssignments.user_id": { table: "users", column: "id" },
+  "revenueRecognitionRules.customer_id": { table: "customers", column: "id" },
+  "revenueRecognitionRules.project_id": { table: "projects", column: "id" },
+  "revenueRecognitionRules.category_id": { table: "categories", column: "id" },
+  "revenueRecognitionRules.cost_center_id": {
+    table: "costCenters",
+    column: "id",
+  },
+  "revenueRecognitionRules.customer_po_id": {
+    table: "customerPOs",
+    column: "id",
+  },
+  "revenueRecognitionTransactions.customer_id": {
+    table: "customers",
+    column: "id",
+  },
+  "revenueRecognitionTransactions.project_id": {
+    table: "projects",
+    column: "id",
+  },
+  "revenueRecognitionTransactions.project_task_id": {
+    table: "tasks",
+    column: "id",
+  },
+  "revenueRecognitionTransactions.slip_id": { table: "charges", column: "id" },
+  "revenueRecognitionTransactions.revenue_recognition_rule_id": {
+    table: "revenueRecognitionRules",
+    column: "id",
+  },
+  "revenueRecognitionTransactions.category_id": {
+    table: "categories",
+    column: "id",
+  },
+  "revenueRecognitionTransactions.cost_center_id": {
+    table: "costCenters",
+    column: "id",
+  },
+  "revenueRecognitionTransactions.customer_po_id": {
+    table: "customerPOs",
+    column: "id",
+  },
+  "revenueRecognitionTransactions.job_code_id": {
+    table: "jobCodes",
+    column: "id",
+  },
+  "revenueRecognitionTransactions.task_id": {
+    table: "timeEntries",
+    column: "id",
+  },
+  "revenueRecognitionTransactions.ticket_id": {
+    table: "receipts",
+    column: "id",
+  },
+  "revenueRecognitionTransactions.user_id": { table: "users", column: "id" },
+  "scriptRequests.issue_category_id": {
+    table: "issueCategories",
+    column: "id",
+  },
+  "scriptRequests.issue_severity_id": {
+    table: "issueSeverities",
+    column: "id",
+  },
+  "scriptRequests.issue_source_id": { table: "issueSources", column: "id" },
+  "scriptRequests.issue_stage_id": { table: "issueStages", column: "id" },
+  "scriptRequests.owner_id": { table: "users", column: "id" },
+  "scriptRequests.project_id": { table: "projects", column: "id" },
+  "scriptRequests.project_task_id": { table: "tasks", column: "id" },
+  "scriptRequests.user_id": { table: "users", column: "id" },
+  "scriptRequests.customer_id": { table: "customers", column: "id" },
 };
 
 // --- Connection + materialization caching ---------------------------------
@@ -396,8 +509,42 @@ async function getNonEmptyPaths(paths) {
   return nonEmpty.length > 0 ? nonEmpty : paths;
 }
 
+// Returns the list of viewNames that failed to materialize (empty if all
+// succeeded). Each table is isolated in its own try/catch -- one missing or
+// malformed S3 file must not take down every OTHER table along with it.
+// Confirmed happening in production: referencing a not-yet-synced table's
+// file in REPORT_VIEWS threw on the very first table processed, aborting
+// the whole loop and breaking every table, including 20+ that were working
+// fine moments earlier. A failed table is simply never CREATEd (or, on a
+// warm re-materialize, keeps whatever it had before -- CREATE OR REPLACE
+// never runs, so the prior version isn't touched) -- getSchema separately
+// skips any view that isn't actually queryable, so a broken table doesn't
+// show up as available either.
 async function materializeTables(connection, viewNames) {
+  const failedViewNames = [];
+
   for (const viewName of viewNames) {
+    try {
+      await materializeOneTable(connection, viewName);
+    } catch (error) {
+      failedViewNames.push(viewName);
+      console.error(
+        `Failed to materialize "${viewName}" -- skipping it, other tables are unaffected: ${error.message}`,
+      );
+    }
+  }
+
+  if (failedViewNames.length > 0) {
+    console.error(
+      `materializeTables: ${failedViewNames.length} of ${viewNames.length} table(s) failed: ${failedViewNames.join(", ")}`,
+    );
+  }
+
+  return failedViewNames;
+}
+
+async function materializeOneTable(connection, viewName) {
+  {
     const s3Paths = REPORT_VIEWS[viewName];
     const allPaths = Array.isArray(s3Paths) ? s3Paths : [s3Paths];
     const paths = await getNonEmptyPaths(allPaths);
@@ -462,21 +609,38 @@ async function materializeTables(connection, viewNames) {
     // "0000-00-00" sentinel, real NULLs, and genuinely invalid values, all
     // in the same column. Add more formats here if a future dataset uses
     // something else (e.g. "%d/%m/%Y" for day-first locales).
-    const DATE_FORMATS = ["'%Y-%m-%d'", "'%m/%d/%Y'"];
+    //
+    // '%Y-%m-%d %H:%M:%S' is required for sppDataSync's audit columns --
+    // flattenFieldValue deliberately keeps full time-of-day precision for
+    // created/updated (e.g. "2026-09-15 12:31:07"), unlike plain "date"
+    // business fields, which stay date-only. Without this format,
+    // try_strptime matches neither of the other two and CAST(NULL AS DATE)
+    // silently succeeds -- confirmed live: 0 of 2310 projects had a
+    // non-null "created" before this was added, despite every row having a
+    // real value in the raw S3 file. The CAST to DATE below still drops
+    // the time component on purpose, same as it always has -- this format
+    // just lets a real value get through try_strptime in the first place.
+    const DATE_FORMATS = ["'%Y-%m-%d %H:%M:%S'", "'%Y-%m-%d'", "'%m/%d/%Y'"];
 
+    // Every sync file carries a synthetic "deleted" column (see
+    // sppDataSync.js) that the old Celigo recent/historical files never
+    // had -- EXCLUDE drops it from the materialized schema entirely (the
+    // AI agent never sees or has to reason about it), and the WHERE below
+    // drops the rows themselves, matching the old files' behavior of never
+    // containing deleted records in the first place.
     const selectClause =
       dateCols.length > 0
-        ? `SELECT * REPLACE (${dateCols
+        ? `SELECT * EXCLUDE (deleted) REPLACE (${dateCols
             .map(
               (col) =>
                 `CAST(try_strptime(NULLIF("${col}", '0000-00-00'), [${DATE_FORMATS.join(", ")}]) AS DATE) AS "${col}"`,
             )
             .join(", ")})`
-        : "SELECT *";
+        : "SELECT * EXCLUDE (deleted)";
 
     const t0 = Date.now();
     await connection.run(
-      `CREATE OR REPLACE TABLE ${viewName} AS ${selectClause} FROM (${unionedSource}) AS combined;`,
+      `CREATE OR REPLACE TABLE ${viewName} AS ${selectClause} FROM (${unionedSource}) AS combined WHERE COALESCE(deleted, '0') != '1';`,
     );
     console.log(`Materialized "${viewName}" in ${Date.now() - t0}ms`);
   }
@@ -512,8 +676,11 @@ async function setupConnection(region, timings) {
     );
 
     const t1 = Date.now();
-    await materializeTables(cachedConnection, changedTables);
+    const failedViewNames = await materializeTables(cachedConnection, changedTables);
     timings.rematerializeMs = Date.now() - t1;
+    if (failedViewNames.length > 0) {
+      timings.materializeFailures = failedViewNames;
+    }
 
     lastManifest = currentManifest;
     cachedSchema = null; // invalidate -- recomputed lazily on next getSchemas call
@@ -548,8 +715,11 @@ async function setupConnection(region, timings) {
   // bundled in the image -- worth vendoring them into the Docker image.
 
   const t2 = Date.now();
-  await materializeTables(connection, Object.keys(REPORT_VIEWS));
+  const failedViewNames = await materializeTables(connection, Object.keys(REPORT_VIEWS));
   timings.materializeAllMs = Date.now() - t2;
+  if (failedViewNames.length > 0) {
+    timings.materializeFailures = failedViewNames;
+  }
 
   lastManifest = await getCurrentManifest();
   lastStalenessCheckAt = Date.now();
@@ -603,7 +773,16 @@ async function getSchema(connection, timings) {
   const t0 = Date.now();
   const schema = {};
   for (const viewName of Object.keys(REPORT_VIEWS)) {
-    schema[viewName] = await getTableSchema(connection, viewName);
+    try {
+      schema[viewName] = await getTableSchema(connection, viewName);
+    } catch (error) {
+      // A view that failed to materialize (see materializeTables) was
+      // never actually CREATEd, so introspecting it throws -- omit it from
+      // the schema entirely rather than letting one broken table crash
+      // getSchemas for every OTHER table too. The agent simply won't know
+      // this table exists, same as if it weren't in REPORT_VIEWS at all.
+      console.error(`Omitting "${viewName}" from schema -- not queryable: ${error.message}`);
+    }
   }
   timings.schemaComputeMs = Date.now() - t0;
   timings.schemaSource = "computed";

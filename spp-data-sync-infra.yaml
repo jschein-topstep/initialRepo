@@ -1,8 +1,10 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
   Infrastructure for sppDataSync (ai/sppDataSync/) -- replaces Celigo for
-  populating the SPP data CSVs in S3. Manually invoked for now (no schedule,
-  no API Gateway) -- see the Lambda's own comments for the sync design.
+  populating the SPP data CSVs in S3. Runs on an EventBridge schedule
+  against the whole master.csv (see SyncScheduleExpression below), and can
+  still be invoked manually/per-table too -- see the Lambda's own comments
+  for the sync design.
 
 Parameters:
   SppDataSyncImageUri:
@@ -20,11 +22,73 @@ Parameters:
       Reuses the same execution role already used by every other Lambda in
       this project (CloudWatch Logs, S3, DynamoDB, SSM access).
 
+  ResourceSuffix:
+    Type: String
+    Default: ""
+    Description: >
+      Appended to every resource name in this stack (e.g. "-acme" ->
+      "sppDataSync-acme") -- lets a second customer deploy this same
+      template as its own stack without colliding with an existing one.
+      Left empty for TopStep's own stack, which keeps the original
+      unsuffixed names ("sppDataSync", "sppSyncWatermarks") exactly as they
+      are today -- changing this on an EXISTING stack renames (replaces)
+      its Lambda and DynamoDB table, so never set this on a redeploy of an
+      already-running customer's stack, only at first creation.
+
+  SSMParamPrefix:
+    Type: String
+    Default: /spp/top-step
+    Description: >
+      REQUIRED -- SSM Parameter Store path prefix this customer's SPP API
+      key/XML URL live under (expects {prefix}/sandboxKey,
+      {prefix}/productionKey, {prefix}/sandboxXMLURL,
+      {prefix}/productionXMLURL to already exist -- this stack doesn't
+      create them). Deliberately has no implicit code-level fallback (see
+      sppDataSync.js) -- every customer, including this default for
+      TopStep's own stack, must set this explicitly so a misconfigured
+      deployment fails loudly instead of silently reading another
+      customer's SPP credentials.
+
+  SyncScheduleExpression:
+    Type: String
+    Default: "rate(15 minutes)"
+    Description: >
+      EventBridge schedule expression for an automatic all-tables sync
+      (runs the whole master.csv, same as a manual invoke with no "table"
+      in the payload). Set to "" (empty) to disable scheduling entirely --
+      no EventBridge rule gets created, manual/per-table invokes still
+      work as always. SyncIntegrationKey, SyncInstance, and SyncCompany
+      below are REQUIRED whenever this isn't empty, since the schedule's
+      invocation payload is fixed (there's no caller to supply them like a
+      manual invoke has).
+
+  SyncIntegrationKey:
+    Type: String
+    Default: ""
+    Description: >
+      integrationKey for the scheduled sync's fixed payload (e.g.
+      "spp-top step-prod"). Required if SyncScheduleExpression is set.
+
+  SyncInstance:
+    Type: String
+    Default: "production"
+    Description: "instance for the scheduled sync's fixed payload -- \"sandbox\" or \"production\"."
+
+  SyncCompany:
+    Type: String
+    Default: ""
+    Description: >
+      company for the scheduled sync's fixed payload (e.g. "top-step").
+      Required if SyncScheduleExpression is set.
+
+Conditions:
+  HasSchedule: !Not [!Equals [!Ref SyncScheduleExpression, ""]]
+
 Resources:
   SppSyncWatermarksTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: sppSyncWatermarks
+      TableName: !Sub "sppSyncWatermarks${ResourceSuffix}"
       BillingMode: PAY_PER_REQUEST
       SSESpecification:
         SSEEnabled: true
@@ -38,18 +102,55 @@ Resources:
   SppDataSyncFunction:
     Type: AWS::Lambda::Function
     Properties:
-      FunctionName: sppDataSync
+      FunctionName: !Sub "sppDataSync${ResourceSuffix}"
       PackageType: Image
       Code:
         ImageUri: !Ref SppDataSyncImageUri
       Role: !Ref LambdaExecutionRoleArn
-      Timeout: 900 # 15 minutes -- Lambda's hard maximum; large tables may
-                   # still need multiple manual re-invocations to fully
-                   # catch up on their first (full-load) run.
-      MemorySize: 1024
+      Timeout: 900 # 15 minutes -- Lambda's hard maximum; a table that can't
+                   # finish in one invocation checkpoints its progress and
+                   # reports "partial" instead of failing (see
+                   # runTableSync in sppDataSync.js) -- the next invocation
+                   # (scheduled or manual) picks up where it left off.
+      MemorySize: 3008 # bumped from 1024 -- a 288k-row/16-field production
+                       # table maxed out 1024 MB (fetchAllPages holds the
+                       # whole batch in memory, and mergeIntoS3Csv loads the
+                       # full existing CSV + full new batch into DuckDB at
+                       # once), so bigger tables risk OOM at the old size.
+                       # Also buys more CPU, which Lambda scales with memory.
+      ReservedConcurrentExecutions: 1 # EventBridge schedules don't prevent
+                       # overlapping runs on their own -- if a sync ever
+                       # takes longer than the schedule interval, this
+                       # makes AWS queue the next attempt instead of
+                       # running it concurrently, which would otherwise
+                       # race on the same DynamoDB watermark rows and S3
+                       # files.
       Environment:
         Variables:
           WATERMARKS_TABLE: !Ref SppSyncWatermarksTable
+          SSM_PARAM_PREFIX: !Ref SSMParamPrefix
+
+  SppDataSyncScheduleRule:
+    Type: AWS::Events::Rule
+    Condition: HasSchedule
+    Properties:
+      Name: !Sub "spp-data-sync-schedule${ResourceSuffix}"
+      ScheduleExpression: !Ref SyncScheduleExpression
+      State: ENABLED
+      Targets:
+        - Id: SppDataSyncFunction
+          Arn: !GetAtt SppDataSyncFunction.Arn
+          Input: !Sub |
+            {"integrationKey":"${SyncIntegrationKey}","instance":"${SyncInstance}","company":"${SyncCompany}"}
+
+  SppDataSyncSchedulePermission:
+    Type: AWS::Lambda::Permission
+    Condition: HasSchedule
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref SppDataSyncFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt SppDataSyncScheduleRule.Arn
 
 Outputs:
   FunctionName:

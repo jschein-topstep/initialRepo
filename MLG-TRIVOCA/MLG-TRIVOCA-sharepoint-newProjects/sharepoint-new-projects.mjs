@@ -1,3 +1,11 @@
+// =============================================================================
+// NOTE (9/21): We were asked to remove the SharePoint/Teams "Team" logic for
+// now. All Team-related code (Team creation, creation polling, owner lookup
+// for the Team, Team ID writeback to SPP, and Team mentions in the owner
+// email) has been COMMENTED OUT rather than deleted, in case we need it again.
+// Search for "TEAM LOGIC DISABLED" to find every spot that was changed.
+// =============================================================================
+
 import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
 
 const lambdaClient = new LambdaClient({ region: "us-east-2" });
@@ -22,15 +30,31 @@ const SITE_PATH_BY_DIVISION = {
   Quant: "/sites/QuantitativeProjects", // adjust if the actual Quant site path differs
 };
 
-// Mailbox used to send the "your folders/Team are ready" notification.
+// Mailbox used to send the "your folders are ready" notification.
 // Must be a real mailbox in the tenant — app-only Mail.Send sends AS this
 // user, not as the project owner. Recipient (project.owner_email) can be
 // any valid address.
 const NOTIFICATION_FROM_MAILBOX = "rschein@topstepllc.com";
 
+// Only projects closed-won ON OR AFTER this date are provisioned. SPP sends
+// project_closed_won_date__c as "YYYY-MM-DD", which sorts correctly as a
+// plain string, so no Date parsing (or timezone drift) is needed.
+const CLOSED_WON_CUTOFF = "2026-09-24";
+
+// True if the project's closed-won date is on/after CLOSED_WON_CUTOFF.
+// Blank, missing, or SPP's "0000-00-00" empty-date value all fail the check.
+function isEligibleByClosedWonDate(project) {
+  const closedWon = (project.project_closed_won_date__c || "").substring(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(closedWon) || closedWon === "0000-00-00") {
+    return false;
+  }
+  return closedWon >= CLOSED_WON_CUTOFF;
+}
+
 // Retrieve NEW projects from SPP (passed via lambda function call) and
-// provision SharePoint folders + a Team for each. Handles updates to
-// EXISTING projects in a separate Lambda.
+// provision SharePoint folders for each. Handles updates to EXISTING
+// projects in a separate Lambda.
+// (TEAM LOGIC DISABLED 9/21 — previously also provisioned a Team per project.)
 export const handler = async (event) => {
   const bodyJSON = JSON.parse(event.body);
   console.log(`bodyJSON: ${JSON.stringify(bodyJSON)}`);
@@ -40,24 +64,45 @@ export const handler = async (event) => {
     return;
   }
 
+  // Skip anything closed-won before CLOSED_WON_CUTOFF (or with no date)
+  const eligibleProjects = bodyJSON.projects.filter((project) => {
+    const eligible = isEligibleByClosedWonDate(project);
+    if (!eligible) {
+      console.log(
+        `Skipping "${project.name}" — project_closed_won_date__c "${project.project_closed_won_date__c}" is empty or before ${CLOSED_WON_CUTOFF}`,
+      );
+    }
+    return eligible;
+  });
+
+  if (eligibleProjects.length === 0) {
+    console.log(
+      `No projects with project_closed_won_date__c on/after ${CLOSED_WON_CUTOFF}`,
+    );
+    return;
+  }
+
   const token = await getGraphToken();
 
   await Promise.all(
-    bodyJSON.projects.map(async (project) => {
-      let teamId = project.proj_sharepoint_team_id__c;
-
-      if (teamId) {
-        console.log(
-          `Project "${project.name}" already has a Team (id=${teamId}) — skipping Team creation`,
-        );
-      } else {
-        const ownerId = await getUserId(token, project.owner_email);
-        teamId = await newSharepointTeam(token, project.name, ownerId);
-      }
+    eligibleProjects.map(async (project) => {
+      // TEAM LOGIC DISABLED (9/21) — Team creation for new projects
+      // let teamId = project.proj_sharepoint_team_id__c;
+      //
+      // if (teamId) {
+      //   console.log(
+      //     `Project "${project.name}" already has a Team (id=${teamId}) — skipping Team creation`,
+      //   );
+      // } else {
+      //   const ownerId = await getUserId(token, project.owner_email);
+      //   teamId = await newSharepointTeam(token, project.name, ownerId);
+      // }
 
       const projectFolder = await createFoldersInSharepoint(project, token);
 
-      await writeSharepointIdsToSpp(project, projectFolder.id, teamId, authObj);
+      // TEAM LOGIC DISABLED (9/21) — original call also passed teamId:
+      // await writeSharepointIdsToSpp(project, projectFolder.id, teamId, authObj);
+      await writeSharepointIdsToSpp(project, projectFolder.id, authObj);
 
       await emailProjectOwner(project, token);
     }),
@@ -201,7 +246,11 @@ async function createFoldersInSharepoint(project, token) {
     },
   ];
 
-  const projectFolder = await createFolder(token, driveId, project.name);
+  const projectFolder = await createFolder(
+    token,
+    driveId,
+    sanitizeSharepointName(project.name),
+  );
 
   // Metadata on the project folder itself
   await addMetadataToSharepointFolder(
@@ -268,18 +317,21 @@ async function addMetadataToSharepointFolder(
   await updateFolderMetadata(token, driveId, folderId, columns);
 }
 
-// Emails the project owner once their SharePoint folders AND Team have been
-// created — called after both createFoldersInSharepoint and newSharepointTeam
-// have resolved for the project. Sends AS NOTIFICATION_FROM_MAILBOX (app-only
-// Mail.Send requires a real tenant mailbox as sender); recipient can be any
-// valid address, since project.owner_email comes straight from SPP.
+// Emails the project owner once their SharePoint folders have been created —
+// called after createFoldersInSharepoint has resolved for the project. Sends
+// AS NOTIFICATION_FROM_MAILBOX (app-only Mail.Send requires a real tenant
+// mailbox as sender); recipient can be any valid address, since
+// project.owner_email comes straight from SPP.
+// (TEAM LOGIC DISABLED 9/21 — email previously also announced the Team.)
 async function emailProjectOwner(project, token) {
   const message = {
     message: {
       subject: `SharePoint site ready: ${project.name}`,
       body: {
         contentType: "Text",
-        content: `Hi,\n\nThe SharePoint folder structure and Team for "${project.name}" have been created and are ready to use.\n\nThanks,\nAutomation`,
+        // TEAM LOGIC DISABLED (9/21) — original body mentioned the Team:
+        // content: `Hi,\n\nThe SharePoint folder structure and Team for "${project.name}" have been created and are ready to use.\n\nThanks,\nAutomation`,
+        content: `Hi,\n\nThe SharePoint folder structure for "${project.name}" has been created and is ready to use.\n\nThanks,\nAutomation`,
       },
       toRecipients: [
         { emailAddress: { address: project.owner_email } },
@@ -315,18 +367,21 @@ async function emailProjectOwner(project, token) {
   );
 }
 
-// Writes the newly-created SharePoint folder ID and Team ID back to the
-// project's record in SPP. Call this once both createFoldersInSharepoint
-// and newSharepointTeam have resolved, so both IDs are available together.
-async function writeSharepointIdsToSpp(project, folderId, teamId, authObj) {
+// Writes the newly-created SharePoint folder ID back to the project's record
+// in SPP. Call this once createFoldersInSharepoint has resolved.
+// TEAM LOGIC DISABLED (9/21) — original signature also accepted teamId:
+// async function writeSharepointIdsToSpp(project, folderId, teamId, authObj) {
+async function writeSharepointIdsToSpp(project, folderId, authObj) {
   console.log(`WRITE--authObj: ${JSON.stringify(authObj)}`);
-  console.log(`WRITE--teamId: ${JSON.stringify(teamId)}`);
+  // TEAM LOGIC DISABLED (9/21)
+  // console.log(`WRITE--teamId: ${JSON.stringify(teamId)}`);
   console.log(`WRITE--folderId: ${JSON.stringify(folderId)}`);
   console.log(`WRITE--projectId: ${JSON.stringify(project.id)}`);
   const projectSharepointIds = {
     id: project.id,
     proj_sharepoint_folder_id__c: folderId,
-    proj_sharepoint_team_id__c: teamId,
+    // TEAM LOGIC DISABLED (9/21)
+    // proj_sharepoint_team_id__c: teamId,
   };
 
   const projectUpdateDetails = {
@@ -340,13 +395,21 @@ async function writeSharepointIdsToSpp(project, folderId, teamId, authObj) {
     projectUpdateDetails,
   );
 
+  // TEAM LOGIC DISABLED (9/21) — original log included the Team ID:
+  // console.log(
+  //   `Wrote SharePoint IDs back to SPP for "${project.name}": folder=${folderId}, team=${teamId}`,
+  // );
   console.log(
-    `Wrote SharePoint IDs back to SPP for "${project.name}": folder=${folderId}, team=${teamId}`,
+    `Wrote SharePoint folder ID back to SPP for "${project.name}": folder=${folderId}`,
   );
 
   return projectUpdate;
 }
 
+// =============================================================================
+// TEAM LOGIC DISABLED (9/21) — Team creation + polling. Uncomment to restore.
+// =============================================================================
+/*
 // Create a Sharepoint Team Site for each NEW project (Loop A, Yes branch, second path, first action)
 async function newSharepointTeam(token, teamName, ownerId, description = "") {
   const res = await fetch(`${GRAPH_BASE}/teams`, {
@@ -423,6 +486,7 @@ async function pollTeamCreation(
     `Team creation timed out after ${maxAttempts} attempts for operation: ${operationUrl}. Last known status: "${lastStatus}"`,
   );
 }
+*/
 
 async function getGraphToken() {
   const url = `https://login.microsoftonline.com/07df17c1-4112-495c-b15f-76a25f844f3d/oauth2/v2.0/token`;
@@ -450,6 +514,11 @@ async function getGraphToken() {
   return data.access_token;
 }
 
+// =============================================================================
+// TEAM LOGIC DISABLED (9/21) — owner lookup was only used to assign the Team
+// owner. Uncomment along with newSharepointTeam/pollTeamCreation to restore.
+// =============================================================================
+/*
 const FALLBACK_OWNER_EMAIL = "unassigned.pm@trivoca.com";
 
 // Resolves a user's AAD object id for the given email. Falls back to
@@ -493,7 +562,9 @@ async function getUserId(token, upnOrEmail) {
     `Failed to resolve both primary user "${upnOrEmail}" and fallback "${FALLBACK_OWNER_EMAIL}"`,
   );
 }
+*/
 
+// Builds the division-specific metadata columns object for the folder PATCH.
 // Builds the division-specific metadata columns object for the folder PATCH.
 function buildDivisionMetadataColumns(project, division) {
   const projectDate = project.start_date
@@ -506,6 +577,7 @@ function buildDivisionMetadataColumns(project, division) {
   if (division === "Qual") {
     return {
       ProjectManager: project.owner_name,
+      Secondary_x0020_Project_x0020_Manager: project.secondary_owner_name,
       ProjectCoordinator: project.coordinator_name,
       ProjectDate: projectDate,
       ProjectEndDate: projectEndDate,
@@ -517,6 +589,8 @@ function buildDivisionMetadataColumns(project, division) {
   if (division === "Quant") {
     return {
       Project_x0020_Manager: project.owner_name,
+      // Verify this internal name against the "Writable column names" log line
+      Secondary_x0020_Project_x0020_Manager: project.secondary_owner_name,
       Project_x0020_Coordinator: project.coordinator_name,
       Project_x0020_Start_x0020_Date: projectDate,
       Project_x0020_End_x0020_Date: projectEndDate,
@@ -526,4 +600,62 @@ function buildDivisionMetadataColumns(project, division) {
     };
   }
   return null;
+}
+// SharePoint Online rejects these in file/folder names: " * : < > ? / \ |
+// (# and % are allowed in SPO). Also strips control characters.
+const INVALID_SP_CHARS = /["*:<>?/\\|\x00-\x1F]/g;
+
+// Names SharePoint blocks outright, regardless of characters
+const RESERVED_SP_NAMES = new Set([
+  ".lock",
+  "con",
+  "prn",
+  "aux",
+  "nul",
+  "com0",
+  "com1",
+  "com2",
+  "com3",
+  "com4",
+  "com5",
+  "com6",
+  "com7",
+  "com8",
+  "com9",
+  "lpt0",
+  "lpt1",
+  "lpt2",
+  "lpt3",
+  "lpt4",
+  "lpt5",
+  "lpt6",
+  "lpt7",
+  "lpt8",
+  "lpt9",
+  "_vti_",
+  "desktop.ini",
+]);
+
+// Returns a SharePoint-safe folder name, or throws if nothing usable is left.
+function sanitizeSharepointName(rawName) {
+  let name = (rawName || "")
+    .replace(INVALID_SP_CHARS, "-")
+    .replace(/\s+/g, " ") // collapse runs of whitespace
+    .replace(/^~\$/, "") // leading ~$ is blocked
+    .trim()
+    .replace(/[.\s]+$/, ""); // no trailing periods or spaces
+
+  if (name.includes("_vti_")) name = name.replace(/_vti_/g, "-vti-");
+  if (RESERVED_SP_NAMES.has(name.toLowerCase())) name = `${name}-project`;
+
+  // Keep well under the 400-char full-path limit
+  if (name.length > 200) name = name.substring(0, 200).trim();
+
+  if (!name) {
+    throw new Error(`Project name "${rawName}" is empty after sanitizing`);
+  }
+  if (name !== rawName) {
+    console.log(`Sanitized folder name: "${rawName}" -> "${name}"`);
+  }
+  return name;
 }

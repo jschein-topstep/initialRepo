@@ -1,3 +1,11 @@
+// =============================================================================
+// NOTE (9/21): We were asked to remove the SharePoint/Teams "Team" logic for
+// now. All Team-related code (Team archiving, archive-operation polling, and
+// the Team-owner user lookup) has been COMMENTED OUT rather than deleted, in
+// case we need it again.
+// Search for "TEAM LOGIC DISABLED" to find every spot that was changed.
+// =============================================================================
+
 import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
 
 const lambdaClient = new LambdaClient({ region: "us-east-2" });
@@ -33,7 +41,9 @@ export const handler = async (event) => {
 
   await Promise.all(
     bodyJSON.projects.map(async (project) => {
-      const ownerId = await getUserId(token, "anthony.flores@trivoca.com");
+      // TEAM LOGIC DISABLED (9/21) — owner lookup (result was unused here;
+      // Team-owner related).
+      // const ownerId = await getUserId(token, "anthony.flores@trivoca.com");
       console.log(`Inactivation date: ${project.proj_inactivation_date__c}`);
 
       if (project.proj_inactivation_date__c != "0000-00-00") {
@@ -61,17 +71,18 @@ export const handler = async (event) => {
             console.log(`No QUAL or QUANT projects found`);
           }
 
-          if (project.proj_sharepoint_team_id__c) {
-            await archiveSharepointTeam(
-              token,
-              project.proj_sharepoint_team_id__c,
-              project.name,
-            );
-          } else {
-            console.log(
-              `No proj_sharepoint_team_id__c on project "${project.name}" — skipping Team archive.`,
-            );
-          }
+          // TEAM LOGIC DISABLED (9/21) — Team archive on closure
+          // if (project.proj_sharepoint_team_id__c) {
+          //   await archiveSharepointTeam(
+          //     token,
+          //     project.proj_sharepoint_team_id__c,
+          //     project.name,
+          //   );
+          // } else {
+          //   console.log(
+          //     `No proj_sharepoint_team_id__c on project "${project.name}" — skipping Team archive.`,
+          //   );
+          // }
         }
       }
     }),
@@ -193,6 +204,11 @@ async function deleteClientListSubfolder(project, token) {
   return { deleted: true, itemId: clientListFolder.id };
 }
 
+// =============================================================================
+// TEAM LOGIC DISABLED (9/21) — Team archive + async operation polling.
+// Uncomment to restore.
+// =============================================================================
+/*
 // Archives the SharePoint Team whose id is stored on the project record
 // (project.proj_sharepoint_team_id__c). Skips cleanly if the team is missing
 // or already archived, so re-running this Lambda against the same project
@@ -280,6 +296,7 @@ async function pollTeamOperation(
     `Team operation timed out after ${maxAttempts} attempts for operation: ${operationUrl}. Last known status: "${lastStatus}"`,
   );
 }
+*/
 
 async function getGraphToken() {
   const url = `https://login.microsoftonline.com/07df17c1-4112-495c-b15f-76a25f844f3d/oauth2/v2.0/token`;
@@ -307,6 +324,11 @@ async function getGraphToken() {
   return data.access_token;
 }
 
+// =============================================================================
+// TEAM LOGIC DISABLED (9/21) — AAD user lookup, only referenced by the
+// commented-out owner lookup in the handler. Uncomment along with it.
+// =============================================================================
+/*
 async function getUserId(token, upnOrEmail) {
   const res = await fetch(
     `${GRAPH_BASE}/users/${encodeURIComponent(upnOrEmail)}?$select=id,displayName,userPrincipalName`,
@@ -323,3 +345,4 @@ async function getUserId(token, upnOrEmail) {
   console.log(`Resolved user: ${data.userPrincipalName} -> id: ${data.id}`);
   return data.id;
 }
+*/

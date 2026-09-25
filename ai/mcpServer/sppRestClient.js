@@ -13,6 +13,13 @@ const sppUserAuth = require("./sppUserAuth.js");
 const RECORD_TYPE_PATHS = {
   projects: "projects",
   users: "users",
+  // Confirmed working 2026-09-25: GET /rest/v1/customers returns a
+  // filter-set-scoped id list (paginated, same {data:[{id}], meta.links}
+  // shape as projects/users) -- verified end to end against a real
+  // connected user (filter set 1, unrestricted): REST returned every
+  // non-deleted customer and nothing else, matching the full synced
+  // customer.csv exactly once the 3 deleted rows are excluded.
+  customers: "customers",
 };
 
 function restBaseUrl(baseConfig) {

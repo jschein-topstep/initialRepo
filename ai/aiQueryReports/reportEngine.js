@@ -1,3 +1,13 @@
+// The DuckDB-based SPP reporting engine: materializes the S3-synced CSVs
+// (see sppDataSync.js) into in-memory tables per this company's
+// report_config.json (see loadReportConfig below), and answers schema/
+// query/field-value requests against them. Deployed both as its own
+// Lambda (aiQueryReports) and reused as-is (via ai/mcpServer/Dockerfile's
+// COPY, and tools.js's require("./reportEngine.js")) inside sppMcpServer,
+// the Lambda the Claude connector actually talks to -- the two always need
+// redeploying together, since sppMcpServer bakes in its own copy of this
+// exact file rather than calling the other Lambda.
+//
 // Docker deployment:
 // Open Docker Desktop
 // In PowerShell, Login:  aws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin 776528084998.dkr.ecr.us-east-2.amazonaws.com
@@ -24,272 +34,39 @@ const DATA_PREFIX = "spp-data";
 const basePath = `s3://${BUCKET}/${DATA_PREFIX}/${instanceName}`;
 console.log("basePath: " + basePath);
 
-// Cut over from Celigo's recent/historical split files to sppDataSync's
-// single incrementally-merged file per table (spp-data/{company}/sync/). A
-// single-path entry gets a one-branch UNION ALL downstream -- functionally
-// a no-op vs. the old two-path arrays, so nothing else needed to change to
-// support this. Every one of these files carries a synthetic "deleted"
-// column (see sppDataSync.js) that the old recent/historical files never
-// had -- materializeTables strips it out (both the rows and the column
-// itself), matching the old files' behavior of never containing deleted
-// records at all.
-const REPORT_VIEWS = {
-  booking: `${basePath}/sync/booking.csv`,
-  charges: `${basePath}/sync/slip.csv`,
-  customers: `${basePath}/sync/customer.csv`,
-  expenseReports: `${basePath}/sync/envelope.csv`,
-  invoices: `${basePath}/sync/invoice.csv`,
-  projectBillingRules: `${basePath}/sync/project_billing_rule.csv`,
-  //projectMetrics: `${basePath}/ANALYSIS__transactions_by_Project_User_report_pivot.csv`,
-  projects: `${basePath}/sync/project.csv`,
-  projectStages: `${basePath}/sync/project_stage.csv`,
-  receipts: `${basePath}/sync/ticket.csv`,
-  tasks: `${basePath}/sync/project_task.csv`,
-  timeEntries: `${basePath}/sync/task.csv`,
-  timesheets: `${basePath}/sync/timesheet.csv`,
-  users: `${basePath}/sync/user.csv`,
-  bookingTypes: `${basePath}/sync/booking_type.csv`,
-  budgets: `${basePath}/sync/budget.csv`,
-  categories: `${basePath}/sync/category.csv`,
-  additionalTeams: `${basePath}/sync/category_1.csv`,
-  costCenters: `${basePath}/sync/cost_center.csv`,
-  customerPOs: `${basePath}/sync/customer_po.csv`,
-  customerPoProjectLinks: `${basePath}/sync/customer_po_to_project.csv`,
-  departments: `${basePath}/sync/department.csv`,
-  items: `${basePath}/sync/item.csv`,
-  jobCodes: `${basePath}/sync/job_code.csv`,
-  projectTaskAssignments: `${basePath}/sync/project_task_assignment.csv`,
-  revenueRecognitionRules: `${basePath}/sync/revenue_recognition_rule.csv`,
-  revenueRecognitionTransactions: `${basePath}/sync/revenue_recognition_transaction.csv`,
-  scriptRequests: `${basePath}/sync/issue.csv`,
-  subrecordCategories: `${basePath}/sync/issue_category.csv`,
-  scriptRequestPriority: `${basePath}/sync/issue_severity.csv`,
-  scriptType: `${basePath}/sync/issue_source.csv`,
-  scriptRequestStage: `${basePath}/sync/issue_stage.csv`,
-};
+// REPORT_VIEWS/DATE_COLUMNS/RELATIONSHIPS/FIELD_VALUES used to be hardcoded
+// directly in this file -- one table -> S3 sync file mapping, one table ->
+// date-column list, one column -> foreign-table join hint, one table's
+// coded field values -> what they mean, all customer-specific. That meant
+// a new customer needed their own COPY of this whole file, and every bug
+// fix or improvement had to be applied N times across N copies. They're
+// loaded at runtime instead, from this company's own S3 config file (see
+// loadReportConfig below) -- this file is now identical across every
+// customer; only spp-data/{company}/_config/report_config.json differs.
+// FIELD_VALUES used to be its own folder (_field-values/{viewName}.json,
+// one lazily-fetched-and-cached S3 object per table) -- folded in here
+// instead, since it's exactly the same kind of small, per-customer,
+// hand-edited config as the other three, and didn't need its own S3
+// round-trip mechanism separate from the config file that's already
+// loaded once at cold start.
+let REPORT_VIEWS = {};
+let DATE_COLUMNS = {};
+let RELATIONSHIPS = {};
+let FIELD_VALUES = {};
+// filterSets: static, hand-curated filter-set -> permitted-values gating
+// for small reference tables the SPP REST API doesn't expose with
+// filter-set enforcement (booking type, project stage, category, item,
+// etc.) -- unlike projects/users/customers, which are scoped live per
+// request via a cached per-user REST fetch (see ai/mcpServer/filterScope.js
+// and sppRestClient.js), these tables are static enough that a hand-
+// reviewed config is the right source of truth instead of a live SPP call.
+// Missing/empty (section not present yet, or report_config.json itself not
+// loaded) is treated as "nothing curated yet", not an error -- every
+// static-scoped table just fails closed (permits nothing) until real data
+// exists here, rather than this Lambda refusing to start.
+let FILTER_SETS = {};
 
-// One JSON file per table, e.g.:
-// s3://topstep-ai-offering/spp-data/top-step-sandbox/_field-values/project_billing_rule.json
-const FIELD_VALUES_PREFIX = `${basePath}/_field-values`;
-
-// SPP uses "0000-00-00" as a sentinel for "no date" on some records. Most
-// date-ish columns (acct_date, various status dates) are already typed as
-// String in the schema, so that sentinel just sits there harmlessly as
-// text. But a handful of columns get auto-detected as a real DATE type by
-// read_csv_auto, and a "0000-00-00" value in one of those breaks the WHOLE
-// TABLE's materialization -- not just a query that touches it -- since it
-// fails while DuckDB is casting the full column during CREATE TABLE AS
-// SELECT. This has to be handled at materialization time, not query time,
-// and needs to hold up over time: new records (a charge, invoice, or
-// timesheet entry saved before its date is filled in) can reintroduce this
-// at any point, so a one-time manual data cleanup isn't durable -- this
-// list gets NULLIF'd on every (re)materialization instead.
-// Columns present on every SPP instance regardless of tenant-specific
-// configuration -- these are standard fields, safe to assume everywhere.
-//
-// NOTE: this key MUST exactly match the corresponding key in REPORT_VIEWS
-// (including singular/plural) -- materializeTables looks up
-// DATE_COLUMNS[viewName] using the exact REPORT_VIEWS key, so a mismatch
-// here (e.g. "bookings" here vs "booking" in REPORT_VIEWS) means that
-// table's date columns silently get NONE of the sentinel/format handling
-// below, with no error to indicate anything's wrong -- it just fails later
-// when a "0000-00-00" or non-ISO date shows up in that specific table.
-const DATE_COLUMNS_COMMON = {
-  booking: ["start_date", "end_date", "created", "updated"],
-  charges: ["date", "created", "updated"],
-  customers: ["created", "updated"],
-  expenseReports: ["date", "created", "updated"],
-  invoices: ["date", "created", "updated"],
-  timeEntries: ["date", "created", "updated"],
-  projects: ["start_date", "finish_date", "created", "updated"],
-  projectStages: ["created", "updated"],
-  tasks: ["starts", "fnlt_date", "created", "updated"],
-  users: ["created", "updated"],
-  projectBillingRules: ["created", "updated"],
-  receipts: ["date", "created", "updated"],
-  timesheets: ["starts", "ends", "created", "updated"],
-  bookingTypes: ["created", "updated"],
-  budgets: ["date", "created", "updated"],
-  categories: ["created", "updated"],
-  additionalTeams: ["created", "updated"],
-  costCenters: ["created", "updated"],
-  customerPOs: ["date", "created", "updated"],
-  customerPoProjectLinks: ["created", "updated"],
-  departments: ["created", "updated"],
-  items: ["created", "updated"],
-  jobCodes: ["created", "updated"],
-  projectTaskAssignments: ["created", "updated"],
-  revenueRecognitionRules: ["start_date", "end_date", "created", "updated"],
-  revenueRecognitionTransactions: ["date", "created", "updated"],
-  scriptRequests: [
-    "date",
-    "date_resolution_expected",
-    "date_resolution_required",
-    "date_resolved",
-    "created",
-    "updated",
-  ],
-  subrecordCategories: ["created", "updated"],
-  scriptRequestPriority: ["created", "updated"],
-  scriptType: ["created", "updated"],
-  scriptRequestStage: ["created", "updated"],
-};
-
-// Custom fields (custom_NNN) are configured per SPP instance -- a column
-// that exists for one customer may not exist for another at all. Add an
-// entry here per instanceName as each tenant's custom date fields are
-// identified, rather than assuming they're universal (that assumption is
-// what broke when a second tenant's users table had no custom_208 column).
-//
-// "top-step" has no custom_208 entry here (unlike "top-step-sandbox") as of
-// the sppDataSync cutover -- its master.csv doesn't request that field, so
-// it's not a column in the synced user.csv at all, and read_csv_auto's
-// types={} override hard-errors on a column name that doesn't exist in the
-// file (breaking the WHOLE users table, not just that column). Add it back
-// here if it's ever added to the master.csv.
-const DATE_COLUMNS_BY_INSTANCE = {
-  "top-step-sandbox": {
-    users: ["custom_208"],
-  },
-  // "triton": { /* add triton-specific custom date columns here if any */ },
-};
-
-function mergeDateColumns(common, instanceSpecific) {
-  const merged = {};
-  for (const [table, cols] of Object.entries(common)) {
-    merged[table] = [...cols];
-  }
-  for (const [table, cols] of Object.entries(instanceSpecific ?? {})) {
-    merged[table] = [...(merged[table] ?? []), ...cols];
-  }
-  return merged;
-}
-
-const DATE_COLUMNS = mergeDateColumns(
-  DATE_COLUMNS_COMMON,
-  DATE_COLUMNS_BY_INSTANCE[instanceName],
-);
-
-// NOTE: same exact-key-match requirement as DATE_COLUMNS_COMMON above --
-// getTableSchema looks up RELATIONSHIPS["${viewName}.${columnName}"] using
-// the exact REPORT_VIEWS key, so "bookings.project_id" would never match
-// against the real table name "booking" and that column would silently
-// come back with no "references" metadata in getSchemas at all.
-const RELATIONSHIPS = {
-  "booking.project_id": { table: "projects", column: "id" },
-  "booking.user_id": { table: "users", column: "id" },
-  "booking.owner_id": { table: "users", column: "id" },
-  "booking.project_task_id": { table: "tasks", column: "id" },
-  "charges.customer_id": { table: "customers", column: "id" },
-  "charges.invoice_id": { table: "invoices", column: "id" },
-  "charges.project_id": { table: "projects", column: "id" },
-  "charges.project_task_id": { table: "tasks", column: "id" },
-  "charges.user_id": { table: "users", column: "id" },
-  "expenseReports.customer_id": { table: "customers", column: "id" },
-  "expenseReports.project_id": { table: "projects", column: "id" },
-  "expenseReports.user_id": { table: "users", column: "id" },
-  "invoices.customer_id": { table: "customers", column: "id" },
-  "projectBillingRules.customer_id": { table: "customers", column: "id" },
-  "projectBillingRules.project_id": { table: "projects", column: "id" },
-  // "projectMetrics.Project Internal id": { table: "projects", column: "id" },
-  // "projectMetrics.User Internal id": { table: "users", column: "id" },
-  "projects.customer_id": { table: "customers", column: "id" },
-  "projects.project_stage_id": { table: "projectStages", column: "id" },
-  "projects.user_id": { table: "users", column: "id" },
-  "receipts.customer_id": { table: "customers", column: "id" },
-  "receipts.project_id": { table: "projects", column: "id" },
-  "receipts.envelope_id": { table: "expenseReports", column: "id" },
-  "receipts.user_id": { table: "users", column: "id" },
-  "tasks.project_id": { table: "projects", column: "id" },
-  "timeEntries.customer_id": { table: "customers", column: "id" },
-  "timeEntries.project_id": { table: "projects", column: "id" },
-  "timeEntries.project_task_id": { table: "tasks", column: "id" },
-  "timeEntries.user_id": { table: "users", column: "id" },
-  "timesheets.user_id": { table: "users", column: "id" },
-  "budgets.category_id": { table: "categories", column: "id" },
-  "budgets.customer_id": { table: "customers", column: "id" },
-  "budgets.project_id": { table: "projects", column: "id" },
-  "categories.cost_center_id": { table: "costCenters", column: "id" },
-  "customerPOs.customer_id": { table: "customers", column: "id" },
-  "customerPoProjectLinks.customer_po_id": {
-    table: "customerPOs",
-    column: "id",
-  },
-  "customerPoProjectLinks.project_id": { table: "projects", column: "id" },
-  "departments.user_id": { table: "users", column: "id" },
-  "items.cost_center_id": { table: "costCenters", column: "id" },
-  "projectTaskAssignments.job_code_id": { table: "jobCodes", column: "id" },
-  "projectTaskAssignments.project_task_id": { table: "tasks", column: "id" },
-  "projectTaskAssignments.user_id": { table: "users", column: "id" },
-  "revenueRecognitionRules.customer_id": { table: "customers", column: "id" },
-  "revenueRecognitionRules.project_id": { table: "projects", column: "id" },
-  "revenueRecognitionRules.category_id": { table: "categories", column: "id" },
-  "revenueRecognitionRules.cost_center_id": {
-    table: "costCenters",
-    column: "id",
-  },
-  "revenueRecognitionRules.customer_po_id": {
-    table: "customerPOs",
-    column: "id",
-  },
-  "revenueRecognitionTransactions.customer_id": {
-    table: "customers",
-    column: "id",
-  },
-  "revenueRecognitionTransactions.project_id": {
-    table: "projects",
-    column: "id",
-  },
-  "revenueRecognitionTransactions.project_task_id": {
-    table: "tasks",
-    column: "id",
-  },
-  "revenueRecognitionTransactions.slip_id": { table: "charges", column: "id" },
-  "revenueRecognitionTransactions.revenue_recognition_rule_id": {
-    table: "revenueRecognitionRules",
-    column: "id",
-  },
-  "revenueRecognitionTransactions.category_id": {
-    table: "categories",
-    column: "id",
-  },
-  "revenueRecognitionTransactions.cost_center_id": {
-    table: "costCenters",
-    column: "id",
-  },
-  "revenueRecognitionTransactions.customer_po_id": {
-    table: "customerPOs",
-    column: "id",
-  },
-  "revenueRecognitionTransactions.job_code_id": {
-    table: "jobCodes",
-    column: "id",
-  },
-  "revenueRecognitionTransactions.task_id": {
-    table: "timeEntries",
-    column: "id",
-  },
-  "revenueRecognitionTransactions.ticket_id": {
-    table: "receipts",
-    column: "id",
-  },
-  "revenueRecognitionTransactions.user_id": { table: "users", column: "id" },
-  "scriptRequests.issue_category_id": {
-    table: "issueCategories",
-    column: "id",
-  },
-  "scriptRequests.issue_severity_id": {
-    table: "issueSeverities",
-    column: "id",
-  },
-  "scriptRequests.issue_source_id": { table: "issueSources", column: "id" },
-  "scriptRequests.issue_stage_id": { table: "issueStages", column: "id" },
-  "scriptRequests.owner_id": { table: "users", column: "id" },
-  "scriptRequests.project_id": { table: "projects", column: "id" },
-  "scriptRequests.project_task_id": { table: "tasks", column: "id" },
-  "scriptRequests.user_id": { table: "users", column: "id" },
-  "scriptRequests.customer_id": { table: "customers", column: "id" },
-};
+const REPORT_CONFIG_PATH = `${basePath}/_config/report_config.json`;
 
 // --- Connection + materialization caching ---------------------------------
 //
@@ -311,7 +88,6 @@ let lastStalenessCheckAt = 0;
 
 const STALENESS_CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
-const fieldValuesCache = {}; // viewName -> parsed JSON (or null if confirmed absent)
 let cachedSchema = null; // computed once per materialization, reused by getSchemas
 
 const s3Client = new S3Client({});
@@ -395,23 +171,6 @@ function repairMojibake(text) {
   }
 }
 
-function sanitizeFieldValues(value) {
-  if (typeof value === "string") {
-    return repairMojibake(value);
-  }
-  if (Array.isArray(value)) {
-    return value.map(sanitizeFieldValues);
-  }
-  if (value && typeof value === "object") {
-    const result = {};
-    for (const [k, v] of Object.entries(value)) {
-      result[k] = sanitizeFieldValues(v);
-    }
-    return result;
-  }
-  return value;
-}
-
 function parseS3Path(s3Path) {
   // s3://bucket/key/with/slashes.csv -> { bucket, key }
   const withoutScheme = s3Path.replace(/^s3:\/\//, "");
@@ -420,6 +179,121 @@ function parseS3Path(s3Path) {
     bucket: withoutScheme.slice(0, firstSlash),
     key: withoutScheme.slice(firstSlash + 1),
   };
+}
+
+// (Re)loads REPORT_VIEWS/DATE_COLUMNS/RELATIONSHIPS from this company's S3
+// config file -- called once at cold start, and again whenever the config
+// file's own S3 timestamp changes (see setupConnection's staleness check),
+// so a config edit rolls out the same way a data change already does,
+// without needing a manual redeploy.
+//
+// Deliberately throws rather than leaving REPORT_VIEWS empty/stale on a
+// missing or malformed file: a Lambda that silently starts up with zero
+// tables looks exactly like "no data available" to whoever's asking, with
+// nothing in the logs pointing at the real cause -- an obvious startup
+// error is a much better failure mode than that.
+async function loadReportConfig(connection) {
+  const reader = await connection.runAndReadAll(
+    `SELECT content FROM read_text('${REPORT_CONFIG_PATH}');`,
+  );
+  const rows = await reader.getRowObjects();
+  if (!rows.length || !rows[0].content) {
+    throw new Error(
+      `report_config.json not found or empty at ${REPORT_CONFIG_PATH}`,
+    );
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(rows[0].content);
+  } catch (error) {
+    throw new Error(
+      `report_config.json at ${REPORT_CONFIG_PATH} is not valid JSON: ${error.message}`,
+    );
+  }
+
+  if (
+    !parsed.reportViews ||
+    typeof parsed.reportViews !== "object" ||
+    Object.keys(parsed.reportViews).length === 0
+  ) {
+    throw new Error(
+      `report_config.json at ${REPORT_CONFIG_PATH} is missing a non-empty "reportViews" section`,
+    );
+  }
+
+  // reportViews maps viewName -> bare sync filename (e.g. "slip", not a
+  // full path) -- basePath is reconstructed here rather than stored in the
+  // config file, so the same config still works if this company's data
+  // ever moves to a different bucket/prefix.
+  REPORT_VIEWS = Object.fromEntries(
+    Object.entries(parsed.reportViews).map(([viewName, sourceFile]) => [
+      viewName,
+      `${basePath}/sync/${sourceFile}.csv`,
+    ]),
+  );
+  DATE_COLUMNS = parsed.dateColumns ?? {};
+  RELATIONSHIPS = parsed.relationships ?? {};
+  FIELD_VALUES = parsed.fieldValues ?? {};
+  FILTER_SETS = parsed.filterSets ?? {};
+
+  console.log(
+    `Loaded report_config.json: ${Object.keys(REPORT_VIEWS).length} views, ${Object.keys(FILTER_SETS).length} filter set(s)`,
+  );
+}
+
+async function getConfigLastModified() {
+  const { bucket, key } = parseS3Path(REPORT_CONFIG_PATH);
+  try {
+    const head = await s3Client.send(
+      new HeadObjectCommand({ Bucket: bucket, Key: key }),
+    );
+    return head.LastModified ? head.LastModified.toISOString() : "unknown";
+  } catch (error) {
+    console.log(
+      `HeadObject failed for report_config.json (${REPORT_CONFIG_PATH}): ${error.message}`,
+    );
+    return null;
+  }
+}
+
+let lastConfigModified = null;
+
+// Resolves what a given filter set may see of one static-scoped table's
+// values, from the already-loaded FILTER_SETS. Returns:
+//   "all"        -- unrestricted, caller should apply no WHERE filtering
+//   a Set<string> of permitted ids -- caller should filter to just these
+//   null         -- fail closed (no filter set, unknown filter set, table
+//                    not curated for this filter set, or explicit "none")
+// The exhaustiveness the config format requires (every table listed for
+// every filter set, per report_config.json's filterSets section design)
+// means a missing table key here is itself a sign the config is incomplete
+// or hasn't caught up to a newly-added table yet -- null/fail-closed is the
+// only safe response, same as every other "not sure" case in this function.
+function resolveFilterSetPermittedValues(filterSetId, table) {
+  if (filterSetId === null || filterSetId === undefined || filterSetId === "") {
+    return null;
+  }
+  const filterSet = FILTER_SETS[String(filterSetId)];
+  if (!filterSet || !filterSet.permittedValues) {
+    return null;
+  }
+  const value = filterSet.permittedValues[table];
+  if (value === "all") {
+    return "all";
+  }
+  if (value === "none" || value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value === "object") {
+    const permitted = new Set(
+      Object.entries(value)
+        .filter(([, setting]) => Number(setting) === 1)
+        .map(([id]) => id),
+    );
+    return permitted;
+  }
+  return null;
 }
 
 async function getCurrentManifest() {
@@ -639,8 +513,42 @@ async function materializeOneTable(connection, viewName) {
         : "SELECT * EXCLUDE (deleted)";
 
     const t0 = Date.now();
+    // filterScope.js (ai/mcpServer/) renames a scoped table (projects,
+    // users, customers, bookingTypes, projectStages, categories, items) to
+    // "<name>_raw" and replaces "<name>" itself with a filtered VIEW, on
+    // every authenticated request against a warm container. Once that's
+    // happened even once, a plain `CREATE OR REPLACE TABLE <name>` here
+    // throws ("Existing object <name> is of type View, trying to replace
+    // with type Table") -- DuckDB's OR REPLACE won't swap object kinds --
+    // and materializeTables' per-table try/catch swallows that silently, so
+    // re-materialization quietly stops working for that table for the rest
+    // of that container's lifetime. Confirmed happening in production: a
+    // changed primary_filter_set on the users table never took effect on an
+    // already-warm container no matter how long the staleness check had to
+    // pick it up.
+    //
+    // Fix: unconditionally clear BOTH "<name>" and "<name>_raw", as
+    // whichever object kind each currently is (at most one kind per name
+    // ever actually exists; the other three attempts just get a "wrong
+    // type" or "doesn't exist" error, safe to swallow). Clearing only
+    // "<name>" is NOT enough on its own -- confirmed by testing -- it
+    // leaves the OLD "<name>_raw" from the prior scoping pass behind, which
+    // then collides with filterScope.js's next rename attempt ("Could not
+    // rename... another entry with this name already exists"), and that
+    // rename isn't wrapped in any try/catch, so it crashes the ENTIRE next
+    // request instead of just leaving this one table stale. Dropping both
+    // names' leftovers up front is what keeps filterScope.js's rename step
+    // always landing on a genuinely empty "<name>_raw" slot.
+    for (const candidate of [viewName, `${viewName}_raw`]) {
+      try {
+        await connection.run(`DROP TABLE IF EXISTS "${candidate}"`);
+      } catch {}
+      try {
+        await connection.run(`DROP VIEW IF EXISTS "${candidate}"`);
+      } catch {}
+    }
     await connection.run(
-      `CREATE OR REPLACE TABLE ${viewName} AS ${selectClause} FROM (${unionedSource}) AS combined WHERE COALESCE(deleted, '0') != '1';`,
+      `CREATE TABLE ${viewName} AS ${selectClause} FROM (${unionedSource}) AS combined WHERE COALESCE(deleted, '0') != '1';`,
     );
     console.log(`Materialized "${viewName}" in ${Date.now() - t0}ms`);
   }
@@ -659,9 +567,40 @@ async function setupConnection(region, timings) {
     }
 
     const t0 = Date.now();
-    const currentManifest = await getCurrentManifest();
-    timings.stalenessCheckMs = Date.now() - t0;
+    const currentConfigModified = await getConfigLastModified();
+    timings.configCheckMs = Date.now() - t0;
     lastStalenessCheckAt = now;
+
+    if (currentConfigModified !== null && currentConfigModified !== lastConfigModified) {
+      // The company's report_config.json itself changed -- the SET of
+      // tables could be different now (one added, one removed), not just
+      // individual CSVs, so this reloads the config and re-materializes
+      // everything currently in it, same as a cold start does, rather
+      // than trying to diff the old table set against the new one.
+      console.log(
+        "report_config.json changed in S3 -- reloading config and re-materializing everything",
+      );
+      const tReload0 = Date.now();
+      await loadReportConfig(cachedConnection);
+      lastConfigModified = currentConfigModified;
+      const failedViewNames = await materializeTables(
+        cachedConnection,
+        Object.keys(REPORT_VIEWS),
+      );
+      timings.rematerializeMs = Date.now() - tReload0;
+      if (failedViewNames.length > 0) {
+        timings.materializeFailures = failedViewNames;
+      }
+
+      lastManifest = await getCurrentManifest();
+      cachedSchema = null;
+      timings.connectionSource = "cached (config changed, full re-materialize)";
+      return cachedConnection;
+    }
+
+    const t1 = Date.now();
+    const currentManifest = await getCurrentManifest();
+    timings.stalenessCheckMs = Date.now() - t1;
 
     if (manifestsMatch(currentManifest, lastManifest)) {
       timings.connectionSource = "cached (staleness check passed)";
@@ -675,9 +614,12 @@ async function setupConnection(region, timings) {
       (viewName) => currentManifest[viewName] !== lastManifest[viewName],
     );
 
-    const t1 = Date.now();
-    const failedViewNames = await materializeTables(cachedConnection, changedTables);
-    timings.rematerializeMs = Date.now() - t1;
+    const t2 = Date.now();
+    const failedViewNames = await materializeTables(
+      cachedConnection,
+      changedTables,
+    );
+    timings.rematerializeMs = Date.now() - t2;
     if (failedViewNames.length > 0) {
       timings.materializeFailures = failedViewNames;
     }
@@ -714,8 +656,16 @@ async function setupConnection(region, timings) {
   // likely being fetched over the network on every cold start rather than
   // bundled in the image -- worth vendoring them into the Docker image.
 
+  const tConfig = Date.now();
+  await loadReportConfig(connection);
+  lastConfigModified = await getConfigLastModified();
+  timings.configLoadMs = Date.now() - tConfig;
+
   const t2 = Date.now();
-  const failedViewNames = await materializeTables(connection, Object.keys(REPORT_VIEWS));
+  const failedViewNames = await materializeTables(
+    connection,
+    Object.keys(REPORT_VIEWS),
+  );
   timings.materializeAllMs = Date.now() - t2;
   if (failedViewNames.length > 0) {
     timings.materializeFailures = failedViewNames;
@@ -726,42 +676,6 @@ async function setupConnection(region, timings) {
 
   cachedConnection = connection;
   return cachedConnection;
-}
-
-// Reads s3://.../_field-values/{viewName}.json via the existing DuckDB/httpfs
-// connection (same credential chain as the CSV views) and parses it.
-// Returns null if the file doesn't exist for that table (not every table
-// needs one), and caches the result (including the null) for warm invocations.
-async function getFieldValuesForTable(connection, viewName) {
-  if (Object.prototype.hasOwnProperty.call(fieldValuesCache, viewName)) {
-    return fieldValuesCache[viewName];
-  }
-
-  const s3Path = `${FIELD_VALUES_PREFIX}/${viewName}.json`;
-
-  try {
-    const reader = await connection.runAndReadAll(
-      `SELECT content FROM read_text('${s3Path}');`,
-    );
-    const rows = await reader.getRowObjects();
-
-    if (!rows.length || !rows[0].content) {
-      fieldValuesCache[viewName] = null;
-      return null;
-    }
-
-    const parsed = JSON.parse(rows[0].content);
-    const sanitized = sanitizeFieldValues(parsed);
-    fieldValuesCache[viewName] = sanitized;
-    return sanitized;
-  } catch (error) {
-    // Most common case: no field-values file exists for this table yet.
-    console.log(
-      `No field values found for "${viewName}" (${s3Path}): ${error.message}`,
-    );
-    fieldValuesCache[viewName] = null;
-    return null;
-  }
 }
 
 async function getSchema(connection, timings) {
@@ -781,7 +695,9 @@ async function getSchema(connection, timings) {
       // the schema entirely rather than letting one broken table crash
       // getSchemas for every OTHER table too. The agent simply won't know
       // this table exists, same as if it weren't in REPORT_VIEWS at all.
-      console.error(`Omitting "${viewName}" from schema -- not queryable: ${error.message}`);
+      console.error(
+        `Omitting "${viewName}" from schema -- not queryable: ${error.message}`,
+      );
     }
   }
   timings.schemaComputeMs = Date.now() - t0;
@@ -854,6 +770,10 @@ async function performGetSchemas(connection, timings) {
   return { schema };
 }
 
+// connection is unused here now -- field values come straight out of the
+// already-loaded FIELD_VALUES (see loadReportConfig), no separate S3 read.
+// Left in the signature to match performGetSchemas/performExecuteQuery's
+// calling convention, since callers pass connection to all three uniformly.
 async function performGetFieldValues(connection, table) {
   if (!table) {
     throw new ToolInputError("table parameter is required for getFieldValues");
@@ -864,8 +784,8 @@ async function performGetFieldValues(connection, table) {
     );
   }
 
-  const fieldValues = await getFieldValuesForTable(connection, table);
-  return { table, fieldValues: fieldValues || {} };
+  const fieldValues = FIELD_VALUES[table] ?? {};
+  return { table, fieldValues };
 }
 
 async function performExecuteQuery(connection, sqlQuery, timings) {
@@ -1338,6 +1258,14 @@ Object.assign(exports, {
   performGetFieldValues,
   performExecuteQuery,
   ToolInputError,
+  // Consumed by ai/mcpServer/filterScope.js for static-reference-table
+  // filter-set scoping (booking type, project stage, category, item, ...).
+  // Exported as a function, not the raw FILTER_SETS object, since FILTER_SETS
+  // is a reassigned `let` -- a destructured reference to the object itself
+  // would go stale the moment loadReportConfig() reloads it (same class of
+  // bug as destructuring a live-reassigned export anywhere else in this
+  // codebase; this function always reads the current value instead).
+  resolveFilterSetPermittedValues,
 });
 
 function cleanRows(rows) {
@@ -1351,6 +1279,15 @@ function cleanRows(rows) {
             ? value.micros
             : BigInt(value.micros);
         cleaned[key] = new Date(Number(micros / 1000n)).toISOString();
+      } else if (value && typeof value === "object" && "days" in value) {
+        // convert DuckDB DATE days-since-epoch to a plain "YYYY-MM-DD"
+        // string -- every date-typed column in this schema is CAST to DATE
+        // (see materializeOneTable), so this struct is common, not an edge
+        // case. Confirmed reaching a client unconverted (as a raw
+        // {"days": N} object) before this branch existed.
+        const days =
+          typeof value.days === "bigint" ? Number(value.days) : value.days;
+        cleaned[key] = new Date(days * 86400000).toISOString().slice(0, 10);
       } else if (value === "0000-00-00") {
         cleaned[key] = null;
       } else if (typeof value === "string") {
@@ -1459,9 +1396,9 @@ COPY package.json ${LAMBDA_TASK_ROOT}
 RUN npm install
 
 # Copy your actual code
-COPY index.js ${LAMBDA_TASK_ROOT}
+COPY reportEngine.js ${LAMBDA_TASK_ROOT}
 
 # Tell Lambda which function file and method to execute
-CMD [ "index.handler" ]
+CMD [ "reportEngine.handler" ]
 
 */

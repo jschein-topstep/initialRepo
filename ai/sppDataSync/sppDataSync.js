@@ -8,7 +8,7 @@
 // Deliberately writes to a NEW S3 path (spp-data/{company}/sync/{table}.csv)
 // rather than the existing recent/historical files Celigo currently
 // populates -- this can be built and validated in full isolation from the
-// working production pipeline. Cutting aiQueryReports/index.js's
+// working production pipeline. Cutting aiQueryReports/reportEngine.js's
 // REPORT_VIEWS over to read from here instead is a separate, deliberate
 // step for later, not bundled into this.
 //
@@ -74,7 +74,7 @@ async function getSsmParam(name) {
   return result.Parameter.Value;
 }
 
-// --- DuckDB setup (same pattern as aiQueryReports/index.js) ---------------
+// --- DuckDB setup (same pattern as aiQueryReports/reportEngine.js) ---------------
 
 async function setupDuckDB(region) {
   const instance = await DuckDBInstance.create(":memory:");
@@ -125,8 +125,10 @@ async function readMasterConfig(connection, company) {
     if (row.sppField === DELETED_CSV_FIELD) continue;
 
     const dotIndex = row.sppField.indexOf(".");
-    const sppField = dotIndex === -1 ? row.sppField : row.sppField.slice(0, dotIndex);
-    const subKey = dotIndex === -1 ? undefined : row.sppField.slice(dotIndex + 1);
+    const sppField =
+      dotIndex === -1 ? row.sppField : row.sppField.slice(0, dotIndex);
+    const subKey =
+      dotIndex === -1 ? undefined : row.sppField.slice(dotIndex + 1);
 
     byTable[row.localTable].fields.push({
       sppField,
@@ -167,7 +169,11 @@ const EPOCH_START = { year: 2000, month: 1, day: 1 };
 
 function epochToDateParts(epochSeconds) {
   const d = new Date(epochSeconds * 1000);
-  return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
+  return {
+    year: d.getUTCFullYear(),
+    month: d.getUTCMonth() + 1,
+    day: d.getUTCDate(),
+  };
 }
 
 // Reads the committed watermark (if any) and any in-progress, not-yet-
@@ -182,17 +188,20 @@ async function getSyncState(integrationKey, localTable) {
   );
   if (!result.Item) return { lastSyncedAt: null, backfill: null };
   const item = unmarshall(result.Item);
-  return { lastSyncedAt: item.lastSyncedAt ?? null, backfill: item.backfill ?? null };
+  return {
+    lastSyncedAt: item.lastSyncedAt ?? null,
+    backfill: item.backfill ?? null,
+  };
 }
 
 // Checkpoints an in-progress backfill's progress WITHOUT touching the
 // committed watermark -- that only ever advances once completeBackfill
 // runs, at the end of the whole chain of invocations for this table.
-// NOTE: backfill.deletedIds is stored as-is in a DynamoDB item (400KB
-// limit) -- fine for the deletion volumes seen so far (a few hundred to a
-// few thousand ids), but a table combining an extreme row count with an
-// extreme deletion rate could theoretically overflow it. Not solved here;
-// would need moving that set out to S3 if it ever comes up.
+// `backfill` only ever holds small scalar bookkeeping now (offsets, done
+// flags, the commit watermark) -- the deleted-ids set itself lives in S3
+// (see deletedIdsS3Path), not here, after a table with tens of thousands
+// of deleted records blew past DynamoDB's 400KB per-item limit in
+// production when it was carried in this object directly.
 async function saveBackfillProgress(integrationKey, localTable, backfill) {
   await dynamo.send(
     new UpdateItemCommand({
@@ -231,7 +240,15 @@ async function completeBackfill(integrationKey, localTable, commitWatermark) {
 // deletedMode: "nondeleted-only" (default, omit both attributes -- matches
 // normal SPP UI behavior), "both" (deleted="1" include_nondeleted="1"), or
 // "deleted-only" (deleted="1" alone).
-function buildReadXml({ apiKey, accessToken, sppType, sppFieldNames, watermark, start, deletedMode }) {
+function buildReadXml({
+  apiKey,
+  accessToken,
+  sppType,
+  sppFieldNames,
+  watermark,
+  start,
+  deletedMode,
+}) {
   const returnFields = sppFieldNames.map((f) => `<${f}/>`).join("");
   const deletedAttrs =
     deletedMode === "both"
@@ -246,7 +263,7 @@ function buildReadXml({ apiKey, accessToken, sppType, sppFieldNames, watermark, 
       <access_token>${accessToken}</access_token>
     </Login>
   </Auth>
-  <Read type="${sppType}" method="all" filter="newer-than" field="updated"${deletedAttrs} limit="${start},${PAGE_SIZE}">
+  <Read type="${sppType}" method="all" enable_custom="1" filter="newer-than" field="updated"${deletedAttrs} limit="${start},${PAGE_SIZE}">
     <Date>
       <year>${watermark.year}</year>
       <month>${String(watermark.month).padStart(2, "0")}</month>
@@ -312,7 +329,9 @@ function extractSubFieldValue(value, subKey) {
 
   const keys = Object.keys(value);
   const wrapper =
-    keys.length === 1 && typeof value[keys[0]] === "object" && value[keys[0]] !== null
+    keys.length === 1 &&
+    typeof value[keys[0]] === "object" &&
+    value[keys[0]] !== null
       ? value[keys[0]]
       : value;
 
@@ -348,8 +367,25 @@ const xmlParser = new XMLParser({
 // budget between pages -- unlike the old all-in-one-shot loop this
 // replaced, nothing here drains every page in a single uninterruptible
 // call.
-async function fetchOnePage({ xmlUrl, apiKey, accessToken, sppType, sppFieldNames, watermark, start, deletedMode }) {
-  const xml = buildReadXml({ apiKey, accessToken, sppType, sppFieldNames, watermark, start, deletedMode });
+async function fetchOnePage({
+  xmlUrl,
+  apiKey,
+  accessToken,
+  sppType,
+  sppFieldNames,
+  watermark,
+  start,
+  deletedMode,
+}) {
+  const xml = buildReadXml({
+    apiKey,
+    accessToken,
+    sppType,
+    sppFieldNames,
+    watermark,
+    start,
+    deletedMode,
+  });
 
   const response = await fetch(xmlUrl, {
     method: "POST",
@@ -359,12 +395,19 @@ async function fetchOnePage({ xmlUrl, apiKey, accessToken, sppType, sppFieldName
 
   const responseText = await response.text();
   if (!response.ok) {
-    throw new Error(`SPP XML request failed [${response.status}]: ${responseText}`);
+    throw new Error(
+      `SPP XML request failed [${response.status}]: ${responseText}`,
+    );
   }
 
   const parsed = xmlParser.parse(responseText);
   const pageData = parsed?.response?.Read?.[sppType];
-  const rows = pageData === undefined ? [] : Array.isArray(pageData) ? pageData : [pageData];
+  const rows =
+    pageData === undefined
+      ? []
+      : Array.isArray(pageData)
+        ? pageData
+        : [pageData];
 
   return { rows, isLastPage: rows.length < PAGE_SIZE };
 }
@@ -378,31 +421,100 @@ function remainingMs(context) {
     : Infinity;
 }
 
+// The accumulated deleted-ids set lives in S3, not the DynamoDB backfill
+// item -- confirmed necessary in production: a table with a large enough
+// deletion count (tens of thousands of ids) blew past DynamoDB's 400KB
+// per-item limit ("Item size has exceeded the maximum allowed size"),
+// failing the whole sync. S3 has no comparable size limit, and everything
+// else in this file already goes through DuckDB/httpfs for S3 I/O, so this
+// follows the same pattern rather than adding a raw S3 client.
+function deletedIdsS3Path(company, integrationKey, localTable) {
+  return s3Path(company, "_backfill_state", `${integrationKey}#${localTable}_deletedIds.csv`);
+}
+
+async function saveDeletedIdsToS3(connection, path, ids) {
+  if (ids.length === 0) {
+    // An empty JSON array has no fields for read_json_auto to infer a
+    // schema from -- "SELECT id FROM ..." then fails with "column id not
+    // found" (confirmed happening on every table with zero deletions,
+    // which in practice is most small/stable reference tables). Simplest
+    // fix: write nothing. loadDeletedIdsFromS3's catch already treats a
+    // missing file as an empty set, which is exactly what this is.
+    return;
+  }
+  const tmpFile = `/tmp/deleted_ids_${Date.now()}.json`;
+  fs.writeFileSync(tmpFile, JSON.stringify(ids.map((id) => ({ id }))));
+  await connection.run(
+    `CREATE OR REPLACE TABLE deleted_ids_state AS SELECT id FROM read_json_auto('${tmpFile}');`,
+  );
+  await connection.run(`COPY deleted_ids_state TO '${path}' (FORMAT CSV, HEADER);`);
+  fs.unlinkSync(tmpFile);
+}
+
+async function loadDeletedIdsFromS3(connection, path) {
+  try {
+    const reader = await connection.runAndReadAll(
+      `SELECT id FROM read_csv_auto('${path}', header=true, sample_size=-1);`,
+    );
+    return (await reader.getRowObjects()).map((r) => String(r.id));
+  } catch {
+    // Nothing saved yet for this table -- a fresh backfill's deleted-ids
+    // phase hasn't completed even one checkpoint.
+    return [];
+  }
+}
+
 // Phase 1 of a table's backfill: collect every deleted id matching the
 // watermark ("deleted" isn't a requestable field value -- see
 // DELETED_CSV_FIELD's comment -- so this is the only way to know which ids
-// among a changed set are deleted). Resumable via state.deletedIdsOffset/
-// state.deletedIds -- typically small and fast (deletions are usually a
-// small fraction of a table), but time-boxed the same way as the
-// field-data phase in case it isn't, for some table.
-async function runDeletedIdsPhase({ xmlUrl, apiKey, accessToken, sppType, watermark, state, context }) {
-  const ids = new Set(state.deletedIds ?? []);
+// among a changed set are deleted). Resumable via state.deletedIdsOffset,
+// with the accumulated set itself checkpointed to S3 (see above) rather
+// than carried in state directly -- typically small and fast (deletions
+// are usually a small fraction of a table), but time-boxed the same way
+// as the field-data phase in case it isn't, for some table.
+async function runDeletedIdsPhase({
+  xmlUrl,
+  apiKey,
+  accessToken,
+  sppType,
+  watermark,
+  state,
+  context,
+  connection,
+  company,
+  integrationKey,
+  localTable,
+}) {
+  const idsPath = deletedIdsS3Path(company, integrationKey, localTable);
+  const priorIds = state.deletedIdsOffset > 0
+    ? await loadDeletedIdsFromS3(connection, idsPath)
+    : [];
+  const ids = new Set(priorIds);
   let offset = state.deletedIdsOffset ?? 0;
 
   while (true) {
     if (remainingMs(context) < BACKFILL_TIME_BUDGET_MS) {
-      return { ids: [...ids], offset, done: false };
+      await saveDeletedIdsToS3(connection, idsPath, [...ids]);
+      return { offset, done: false };
     }
 
     const { rows, isLastPage } = await fetchOnePage({
-      xmlUrl, apiKey, accessToken, sppType, watermark, start: offset,
+      xmlUrl,
+      apiKey,
+      accessToken,
+      sppType,
+      watermark,
+      start: offset,
       sppFieldNames: ["id"],
       deletedMode: "deleted-only",
     });
     for (const row of rows) ids.add(String(row.id));
     offset += PAGE_SIZE;
 
-    if (isLastPage) return { ids: [...ids], offset, done: true };
+    if (isLastPage) {
+      await saveDeletedIdsToS3(connection, idsPath, [...ids]);
+      return { offset, done: true };
+    }
   }
 }
 
@@ -412,7 +524,20 @@ async function runDeletedIdsPhase({ xmlUrl, apiKey, accessToken, sppType, waterm
 // written once at the very end -- so a timeout mid-table loses at most one
 // batch's worth of already-fetched-but-not-yet-merged rows, not the whole
 // table's progress. Resumable via state.fieldOffset.
-async function runFieldDataPhase({ xmlUrl, apiKey, accessToken, sppType, fields, watermark, deletedIds, state, context, connection, company, localTable }) {
+async function runFieldDataPhase({
+  xmlUrl,
+  apiKey,
+  accessToken,
+  sppType,
+  fields,
+  watermark,
+  deletedIds,
+  state,
+  context,
+  connection,
+  company,
+  localTable,
+}) {
   // Dedupe -- several fields can share the same base sppField (e.g.
   // addr.city and addr.state both come from requesting "addr" once), so
   // request each base field from SPP only once regardless of how many
@@ -426,7 +551,13 @@ async function runFieldDataPhase({ xmlUrl, apiKey, accessToken, sppType, fields,
 
   const flush = async () => {
     if (pendingBatch.length === 0) return;
-    const result = await mergeIntoS3Csv(connection, company, localTable, fields, pendingBatch);
+    const result = await mergeIntoS3Csv(
+      connection,
+      company,
+      localTable,
+      fields,
+      pendingBatch,
+    );
     lastRowsWritten = result.rowsWritten;
     totalMerged += pendingBatch.length;
     pendingBatch = [];
@@ -439,7 +570,12 @@ async function runFieldDataPhase({ xmlUrl, apiKey, accessToken, sppType, fields,
     }
 
     const { rows: rawRows, isLastPage } = await fetchOnePage({
-      xmlUrl, apiKey, accessToken, sppType, watermark, start: offset,
+      xmlUrl,
+      apiKey,
+      accessToken,
+      sppType,
+      watermark,
+      start: offset,
       sppFieldNames,
       deletedMode: "both",
     });
@@ -464,7 +600,13 @@ async function runFieldDataPhase({ xmlUrl, apiKey, accessToken, sppType, fields,
       if (lastRowsWritten === null) {
         // Nothing was ever merged this run (e.g. genuinely zero changed
         // rows) -- still need the current total for reporting.
-        const result = await mergeIntoS3Csv(connection, company, localTable, fields, []);
+        const result = await mergeIntoS3Csv(
+          connection,
+          company,
+          localTable,
+          fields,
+          [],
+        );
         lastRowsWritten = result.rowsWritten;
       }
       return { offset, done: true, totalMerged, rowsWritten: lastRowsWritten };
@@ -479,18 +621,33 @@ async function runFieldDataPhase({ xmlUrl, apiKey, accessToken, sppType, fields,
 // rather than restarting from scratch. Returns:
 //   { status: "complete", rowsThisRun, rowsWritten }
 //   { status: "partial", phase: "deletedIds" | "fieldData", rowsThisRun }
-async function runTableSync({ xmlUrl, apiKey, accessToken, integrationKey, company, localTable, tableConfig, connection, context }) {
-  const { lastSyncedAt, backfill: existingBackfill } = await getSyncState(integrationKey, localTable);
-  const watermark = lastSyncedAt != null ? epochToDateParts(lastSyncedAt) : EPOCH_START;
+async function runTableSync({
+  xmlUrl,
+  apiKey,
+  accessToken,
+  integrationKey,
+  company,
+  localTable,
+  tableConfig,
+  connection,
+  context,
+}) {
+  const { lastSyncedAt, backfill: existingBackfill } = await getSyncState(
+    integrationKey,
+    localTable,
+  );
+  const watermark =
+    lastSyncedAt != null ? epochToDateParts(lastSyncedAt) : EPOCH_START;
 
   const backfill = existingBackfill ?? {
     // Fixed once, at the start of the FIRST attempt at this backfill --
     // reused on every resume, same as `watermark` above (read from
     // lastSyncedAt, which isn't touched until completeBackfill), so a page
     // offset always means the same thing across the whole chain of
-    // invocations for this table.
+    // invocations for this table. The accumulated deleted-ids set itself
+    // is NOT carried here -- see deletedIdsS3Path -- only its offset/done
+    // bookkeeping, so this object stays small regardless of table size.
     commitWatermark: Math.floor(Date.now() / 1000),
-    deletedIds: [],
     deletedIdsOffset: 0,
     deletedIdsDone: false,
     fieldOffset: 0,
@@ -498,10 +655,18 @@ async function runTableSync({ xmlUrl, apiKey, accessToken, integrationKey, compa
 
   if (!backfill.deletedIdsDone) {
     const result = await runDeletedIdsPhase({
-      xmlUrl, apiKey, accessToken, sppType: tableConfig.sppType, watermark,
-      state: backfill, context,
+      xmlUrl,
+      apiKey,
+      accessToken,
+      sppType: tableConfig.sppType,
+      watermark,
+      state: backfill,
+      context,
+      connection,
+      company,
+      integrationKey,
+      localTable,
     });
-    backfill.deletedIds = result.ids;
     backfill.deletedIdsOffset = result.offset;
     backfill.deletedIdsDone = result.done;
 
@@ -511,25 +676,51 @@ async function runTableSync({ xmlUrl, apiKey, accessToken, integrationKey, compa
     }
   }
 
+  const deletedIds = new Set(
+    await loadDeletedIdsFromS3(connection, deletedIdsS3Path(company, integrationKey, localTable)),
+  );
   const fieldResult = await runFieldDataPhase({
-    xmlUrl, apiKey, accessToken, sppType: tableConfig.sppType, fields: tableConfig.fields, watermark,
-    deletedIds: new Set(backfill.deletedIds),
-    state: backfill, context, connection, company, localTable,
+    xmlUrl,
+    apiKey,
+    accessToken,
+    sppType: tableConfig.sppType,
+    fields: tableConfig.fields,
+    watermark,
+    deletedIds,
+    state: backfill,
+    context,
+    connection,
+    company,
+    localTable,
   });
   backfill.fieldOffset = fieldResult.offset;
 
   if (!fieldResult.done) {
     await saveBackfillProgress(integrationKey, localTable, backfill);
-    return { status: "partial", phase: "fieldData", rowsThisRun: fieldResult.totalMerged };
+    return {
+      status: "partial",
+      phase: "fieldData",
+      rowsThisRun: fieldResult.totalMerged,
+    };
   }
 
   await completeBackfill(integrationKey, localTable, backfill.commitWatermark);
-  return { status: "complete", rowsThisRun: fieldResult.totalMerged, rowsWritten: fieldResult.rowsWritten };
+  return {
+    status: "complete",
+    rowsThisRun: fieldResult.totalMerged,
+    rowsWritten: fieldResult.rowsWritten,
+  };
 }
 
 // --- Merge into S3 (DuckDB-based upsert by id) -----------------------------
 
-async function mergeIntoS3Csv(connection, company, localTable, fields, newRows) {
+async function mergeIntoS3Csv(
+  connection,
+  company,
+  localTable,
+  fields,
+  newRows,
+) {
   const outputPath = s3Path(company, "sync", `${localTable}.csv`);
 
   if (newRows.length === 0) {
@@ -560,16 +751,32 @@ async function mergeIntoS3Csv(connection, company, localTable, fields, newRows) 
   // aiQueryReports' own read_csv_auto (sample_size=-1) do type inference on
   // the READ side keeps this consistent with how every other CSV in this
   // pipeline is already handled.
-  const columnList = columns.map((c) => `CAST("${c}" AS VARCHAR) AS "${c}"`).join(", ");
+  const columnList = columns
+    .map((c) => `CAST("${c}" AS VARCHAR) AS "${c}"`)
+    .join(", ");
 
   // Stage the new batch as its own table via a local temp file + DuckDB's
   // JSON ingestion -- avoids hand-writing CSV-escaping logic ourselves.
   // (DuckDB's httpfs extension doesn't support data: URIs, so this can't
   // be inlined without a real file.)
+  //
+  // read_json_auto (even with sample_size=-1) threw a JSON transform error
+  // on a MERGE_BATCH_SIZE-sized (25,000-row) production batch -- and it
+  // wasn't consistently reproducible against the same real data locally,
+  // suggesting it depends on subtle shape variance the auto-detector
+  // doesn't always resolve the same way, not just sample coverage. Since
+  // every value in newRows is already guaranteed a scalar (string/null) by
+  // flattenFieldValue/extractSubFieldValue before it ever gets here,
+  // sidestep type/shape inference entirely: tell read_json every column IS
+  // VARCHAR up front via the explicit `columns` map, rather than asking
+  // DuckDB to guess. The throw used to happen before fieldOffset gets
+  // checkpointed, so every retry re-fetched the identical batch and failed
+  // the identical way -- wedging the table permanently.
+  const jsonColumns = columns.map((c) => `"${c}": 'VARCHAR'`).join(", ");
   const batchFile = `/tmp/new_batch_${localTable}_${Date.now()}.json`;
   fs.writeFileSync(batchFile, JSON.stringify(newRows));
   await connection.run(
-    `CREATE OR REPLACE TABLE new_batch AS SELECT ${columnList} FROM read_json_auto('${batchFile}');`,
+    `CREATE OR REPLACE TABLE new_batch AS SELECT ${columnList} FROM read_json('${batchFile}', columns={${jsonColumns}});`,
   );
   fs.unlinkSync(batchFile);
 
@@ -593,7 +800,7 @@ async function mergeIntoS3Csv(connection, company, localTable, fields, newRows) 
   // file. That exception used to land in the catch below, which is
   // EXACTLY the "file doesn't exist" path -- confirmed happening in
   // production on a 288k-row table, silently overwriting the entire file
-  // with just the current incremental batch. aiQueryReports/index.js
+  // with just the current incremental batch. aiQueryReports/reportEngine.js
   // already carries this exact lesson in its own comments; this file's
   // own reads of its own previously-written CSV just hadn't gotten it yet.
   let existingExists = true;
@@ -644,12 +851,16 @@ async function mergeIntoS3Csv(connection, company, localTable, fields, newRows) 
       SELECT * FROM new_batch;
     `);
   } else {
-    await connection.run(`CREATE OR REPLACE TABLE merged AS SELECT * FROM new_batch;`);
+    await connection.run(
+      `CREATE OR REPLACE TABLE merged AS SELECT * FROM new_batch;`,
+    );
   }
 
   await connection.run(`COPY merged TO '${outputPath}' (FORMAT CSV, HEADER);`);
 
-  const reader = await connection.runAndReadAll(`SELECT COUNT(*) AS n FROM merged;`);
+  const reader = await connection.runAndReadAll(
+    `SELECT COUNT(*) AS n FROM merged;`,
+  );
   const rows = await reader.getRowObjects();
 
   return { rowsWritten: Number(rows[0].n), wasFirstLoad: !existingExists };
@@ -666,7 +877,10 @@ exports.handler = async (event, context) => {
   } = event;
 
   if (!integrationKey || !instance || !company) {
-    return { statusCode: 400, body: { error: "integrationKey, instance, and company are required" } };
+    return {
+      statusCode: 400,
+      body: { error: "integrationKey, instance, and company are required" },
+    };
   }
 
   // Required, no default -- one dedicated sppDataSync deployment per
@@ -678,14 +892,24 @@ exports.handler = async (event, context) => {
   // a convenience worth having.
   const ssmParamPrefix = process.env.SSM_PARAM_PREFIX;
   if (!ssmParamPrefix) {
-    return { statusCode: 500, body: { error: "SSM_PARAM_PREFIX environment variable is not set on this Lambda" } };
+    return {
+      statusCode: 500,
+      body: {
+        error:
+          "SSM_PARAM_PREFIX environment variable is not set on this Lambda",
+      },
+    };
   }
 
   const region = process.env.AWS_REGION || "us-east-2";
 
   const [apiKey, xmlUrl, { getValidAccessToken }] = await Promise.all([
-    getSsmParam(`${ssmParamPrefix}/${instance === "sandbox" ? "sandboxKey" : "productionKey"}`),
-    getSsmParam(`${ssmParamPrefix}/${instance === "sandbox" ? "sandboxXMLURL" : "productionXMLURL"}`),
+    getSsmParam(
+      `${ssmParamPrefix}/${instance === "sandbox" ? "sandboxKey" : "productionKey"}`,
+    ),
+    getSsmParam(
+      `${ssmParamPrefix}/${instance === "sandbox" ? "sandboxXMLURL" : "productionXMLURL"}`,
+    ),
     import("./oauthUtils.mjs"),
   ]);
   const accessToken = await getValidAccessToken(integrationKey);
@@ -707,15 +931,35 @@ exports.handler = async (event, context) => {
 
     try {
       const result = await runTableSync({
-        xmlUrl, apiKey, accessToken, integrationKey, company, localTable, tableConfig, connection, context,
+        xmlUrl,
+        apiKey,
+        accessToken,
+        integrationKey,
+        company,
+        localTable,
+        tableConfig,
+        connection,
+        context,
       });
 
       if (result.status === "complete") {
-        succeeded.push({ table: localTable, newOrChangedRows: result.rowsThisRun, totalRowsAfterMerge: result.rowsWritten });
-        console.log(`[sppDataSync] "${localTable}": complete -- ${result.rowsThisRun} new/changed rows this run, ${result.rowsWritten} total after merge`);
+        succeeded.push({
+          table: localTable,
+          newOrChangedRows: result.rowsThisRun,
+          totalRowsAfterMerge: result.rowsWritten,
+        });
+        console.log(
+          `[sppDataSync] "${localTable}": complete -- ${result.rowsThisRun} new/changed rows this run, ${result.rowsWritten} total after merge`,
+        );
       } else {
-        partial.push({ table: localTable, phase: result.phase, rowsMergedThisRun: result.rowsThisRun });
-        console.log(`[sppDataSync] "${localTable}": partial (ran out of time during ${result.phase}) -- ${result.rowsThisRun} rows merged this run; re-invoke the same request to continue`);
+        partial.push({
+          table: localTable,
+          phase: result.phase,
+          rowsMergedThisRun: result.rowsThisRun,
+        });
+        console.log(
+          `[sppDataSync] "${localTable}": partial (ran out of time during ${result.phase}) -- ${result.rowsThisRun} rows merged this run; re-invoke the same request to continue`,
+        );
         // Out of time for this table means there's essentially no time
         // left for any remaining tables in this invocation either --
         // stop here rather than let every subsequent table fail the same
@@ -734,7 +978,10 @@ exports.handler = async (event, context) => {
   }
 
   return {
-    statusCode: failed.length > 0 && succeeded.length === 0 && partial.length === 0 ? 500 : 200,
+    statusCode:
+      failed.length > 0 && succeeded.length === 0 && partial.length === 0
+        ? 500
+        : 200,
     body: { succeeded, partial, failed },
   };
 };
@@ -751,6 +998,9 @@ exports._internal = {
   runDeletedIdsPhase,
   runFieldDataPhase,
   runTableSync,
+  deletedIdsS3Path,
+  saveDeletedIdsToS3,
+  loadDeletedIdsFromS3,
   mergeIntoS3Csv,
   readMasterConfig,
   getSyncState,

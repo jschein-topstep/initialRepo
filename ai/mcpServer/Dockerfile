@@ -14,8 +14,9 @@ COPY ai/mcpServer/package.json ${LAMBDA_TASK_ROOT}
 RUN npm install
 
 # Reused as-is from aiQueryReports -- see the additive Object.assign(exports,
-# ...) at the bottom of that file, and tools.js's require("./index.js") here.
-COPY ai/aiQueryReports/index.js ${LAMBDA_TASK_ROOT}/index.js
+# ...) at the bottom of that file, and tools.js's require("./reportEngine.js")
+# here.
+COPY ai/aiQueryReports/reportEngine.js ${LAMBDA_TASK_ROOT}/reportEngine.js
 COPY ai/aiQueryReports/agent-instructions.txt ${LAMBDA_TASK_ROOT}/agent-instructions.txt
 COPY ai/aiQueryReports/tool-description.txt ${LAMBDA_TASK_ROOT}/tool-description.txt
 

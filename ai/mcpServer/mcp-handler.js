@@ -9,9 +9,9 @@ const { applyFilterScope } = require("./filterScope.js");
 const filterCache = require("./filterCache.js");
 const sppRestClient = require("./sppRestClient.js");
 
-const timings = {}; // reused/overwritten per tool call, matches index.js's usage
+const timings = {}; // reused/overwritten per tool call, matches reportEngine.js's usage
 
-// Same system-prompt content the runAgent path in aiQueryReports/index.js
+// Same system-prompt content the runAgent path in aiQueryReports/reportEngine.js
 // uses, surfaced here as the MCP server's "instructions" field (the closest
 // MCP equivalent -- there's no way to force a system prompt on a claude.ai
 // conversation the way a direct Anthropic API call can).

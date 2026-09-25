@@ -1,7 +1,7 @@
 {
   "name": "lambda-duckdb-node",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "reportEngine.js",
   "dependencies": {
     "@anthropic-ai/sdk": "latest",
     "@duckdb/node-api": "latest"

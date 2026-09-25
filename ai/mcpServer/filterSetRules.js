@@ -13,7 +13,7 @@
 // tools.js) references this file -- it's standalone until the real
 // enforcement hookup happens, which will also need to settle how the
 // unfiltered base tables get named once per-request scoped views sit in
-// front of them (that's an index.js change, deliberately deferred).
+// front of them (that's an reportEngine.js change, deliberately deferred).
 //
 // An unsupported/not-yet-implemented metavalue (no resolver below, or
 // blocked on data we don't load yet -- project_task_assign, hierarchy node)

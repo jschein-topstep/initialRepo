@@ -8,9 +8,9 @@ COPY package.json ${LAMBDA_TASK_ROOT}
 RUN npm install
 
 # Copy your actual code
-COPY index.js ${LAMBDA_TASK_ROOT}
+COPY reportEngine.js ${LAMBDA_TASK_ROOT}
 COPY agent-instructions.txt ${LAMBDA_TASK_ROOT}
 COPY tool-description.txt ${LAMBDA_TASK_ROOT}
 
 # Tell Lambda which function file and method to execute
-CMD [ "index.handler" ]
+CMD [ "reportEngine.handler" ]

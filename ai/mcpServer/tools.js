@@ -7,18 +7,18 @@ const {
   ScanCommand,
 } = require("@aws-sdk/lib-dynamodb");
 
-// Reused as-is from aiQueryReports/index.js -- see the additive
+// Reused as-is from aiQueryReports/reportEngine.js -- see the additive
 // Object.assign(exports, ...) at the bottom of that file. This file is
-// COPY'd alongside index.js into the same Lambda image (see Dockerfile), so
-// this relative require resolves within one deployment package even though
-// the two Lambdas are deployed separately.
+// COPY'd alongside reportEngine.js into the same Lambda image (see
+// Dockerfile), so this relative require resolves within one deployment
+// package even though the two Lambdas are deployed separately.
 const {
   setupConnection,
   performGetSchemas,
   performGetFieldValues,
   performExecuteQuery,
   ToolInputError,
-} = require("./index.js");
+} = require("./reportEngine.js");
 
 const sppUserAuth = require("./sppUserAuth.js");
 const sppRestClient = require("./sppRestClient.js");
@@ -34,7 +34,7 @@ function textResult(value) {
         type: "text",
         // DuckDB returns BigInt for COUNT()/SUM() etc. on integer columns --
         // plain JSON.stringify throws on those, so it needs the same
-        // BigInt-safe replacer index.js's own callers use.
+        // BigInt-safe replacer reportEngine.js's own callers use.
         text: JSON.stringify(value, (k, v) => (typeof v === "bigint" ? v.toString() : v)),
       },
     ],
@@ -46,7 +46,7 @@ function errorResult(message) {
 }
 
 // Wraps a tool handler so a ToolInputError (a deliberate "fix and retry"
-// message aimed at the model -- see index.js) comes back as a normal tool
+// message aimed at the model -- see reportEngine.js) comes back as a normal tool
 // result with isError:true, exactly like the runAgent path already does via
 // executeAgentTool. Any other, unexpected error also becomes an isError
 // result rather than a JSON-RPC-level failure, so the model sees it and can
@@ -93,7 +93,7 @@ async function deleteTerminology(term) {
 // created once per Lambda invocation in mcp-handler.js and threaded through
 // here so every tool call in that request shares the same warm DuckDB
 // connection (setupConnection caches it across invocations too, same as the
-// existing runAgent path in index.js). email identifies the authenticated
+// existing runAgent path in reportEngine.js). email identifies the authenticated
 // caller (from the JWT claims API Gateway validated) -- used to scope their
 // SPP connection and, indirectly via the "projects"/"users" views
 // filterScope.js already rebuilt for this request, their query results.

@@ -40,9 +40,10 @@ Parameters:
     Default: /spp/top-step
     Description: >
       REQUIRED -- SSM Parameter Store path prefix this customer's SPP API
-      key/XML URL live under (expects {prefix}/sandboxKey,
-      {prefix}/productionKey, {prefix}/sandboxXMLURL,
-      {prefix}/productionXMLURL to already exist -- this stack doesn't
+      key/XML URL live under (expects {prefix}/{instance}Key and
+      {prefix}/{instance}XMLURL for each instance value actually used --
+      e.g. {prefix}/sandboxKey, {prefix}/productionKey, {prefix}/demoKey,
+      and their XMLURL counterparts -- to already exist; this stack doesn't
       create them). Deliberately has no implicit code-level fallback (see
       sppDataSync.js) -- every customer, including this default for
       TopStep's own stack, must set this explicitly so a misconfigured
@@ -72,7 +73,8 @@ Parameters:
   SyncInstance:
     Type: String
     Default: "production"
-    Description: "instance for the scheduled sync's fixed payload -- \"sandbox\" or \"production\"."
+    AllowedValues: ["sandbox", "production", "demo"]
+    Description: "instance for the scheduled sync's fixed payload -- must match one of sppDataSync.js's KNOWN_INSTANCES, and have a corresponding {prefix}/{instance}Key + {prefix}/{instance}XMLURL SSM param pair."
 
   SyncCompany:
     Type: String

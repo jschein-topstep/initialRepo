@@ -871,7 +871,7 @@ async function mergeIntoS3Csv(
 exports.handler = async (event, context) => {
   const {
     integrationKey, // e.g. "spp-top step-prod" -- picks the exact oauth_config/oauth_tokens row. Not derived from `company` -- see the README note on why.
-    instance, // "sandbox" | "production" -- picks which SPP XML endpoint/API key to use
+    instance, // "sandbox" | "production" | "demo" -- picks which SPP XML endpoint/API key to use
     company, // which spp-data/{company}/_config/master.csv to read
     table, // optional -- sync just this one localTable instead of every table in the master config
   } = event;
@@ -880,6 +880,22 @@ exports.handler = async (event, context) => {
     return {
       statusCode: 400,
       body: { error: "integrationKey, instance, and company are required" },
+    };
+  }
+
+  // Explicit allow-list rather than an `instance === "sandbox" ? sandbox :
+  // production` binary ternary -- that older form silently mapped ANY
+  // unrecognized instance value (e.g. a demo account) onto production's SSM
+  // params instead of erroring, which for a multi-customer stack sharing
+  // this SSM prefix is a real cross-tenant-credential risk, not just a typo
+  // waiting to happen.
+  const KNOWN_INSTANCES = ["sandbox", "production", "demo"];
+  if (!KNOWN_INSTANCES.includes(instance)) {
+    return {
+      statusCode: 400,
+      body: {
+        error: `Unknown instance "${instance}" -- expected one of ${KNOWN_INSTANCES.join(", ")}`,
+      },
     };
   }
 
@@ -904,12 +920,8 @@ exports.handler = async (event, context) => {
   const region = process.env.AWS_REGION || "us-east-2";
 
   const [apiKey, xmlUrl, { getValidAccessToken }] = await Promise.all([
-    getSsmParam(
-      `${ssmParamPrefix}/${instance === "sandbox" ? "sandboxKey" : "productionKey"}`,
-    ),
-    getSsmParam(
-      `${ssmParamPrefix}/${instance === "sandbox" ? "sandboxXMLURL" : "productionXMLURL"}`,
-    ),
+    getSsmParam(`${ssmParamPrefix}/${instance}Key`),
+    getSsmParam(`${ssmParamPrefix}/${instance}XMLURL`),
     import("./oauthUtils.mjs"),
   ]);
   const accessToken = await getValidAccessToken(integrationKey);

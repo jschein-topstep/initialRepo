@@ -204,9 +204,37 @@ async function handleRefreshFilterCache() {
   return { statusCode: 200, body: JSON.stringify({ refreshed: emails.length, failed: failures.length }) };
 }
 
+// Invoked on a schedule (EventBridge rule, see mcp-server-infra.yaml) with
+// {"action": "keepWarm"} -- not an HTTP request, so like
+// handleRefreshFilterCache above it bypasses API Gateway entirely and
+// isn't subject to that path's 30-second integration timeout. Just calls
+// setupConnection directly: a cold container materializes everything (the
+// expensive part -- 20-30s+ for a larger customer like BGB) and becomes
+// warm; an already-warm container just runs its cheap staleness check and
+// returns almost immediately.
+//
+// Exists specifically because full materialization alone can already
+// exceed API Gateway's 30-second cap before a real query even runs --
+// confirmed happening in production (a genuine user query timed out this
+// way on BGB, even though the query itself would have been fast). This
+// doesn't fix that risk on its own -- a request can still land on a
+// genuinely cold container regardless (after a deploy, or if traffic is
+// sparse enough that containers still recycle between pings) -- it just
+// makes hitting a cold container much less likely during normal usage
+// hours, by keeping one warm continuously.
+async function handleKeepWarm() {
+  const region = process.env.AWS_REGION || "us-east-2";
+  const t0 = Date.now();
+  await setupConnection(region, {});
+  return { statusCode: 200, body: JSON.stringify({ warmedInMs: Date.now() - t0 }) };
+}
+
 exports.handler = async (event) => {
   if (event.action === "refreshFilterCache") {
     return await handleRefreshFilterCache();
+  }
+  if (event.action === "keepWarm") {
+    return await handleKeepWarm();
   }
 
   const method = event.requestContext?.http?.method;

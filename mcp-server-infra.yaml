@@ -337,6 +337,38 @@ Resources:
       Principal: events.amazonaws.com
       SourceArn: !GetAtt SppFilterCacheRefreshRule.Arn
 
+  # -------------------------------------------------------
+  # Keep-warm ping: full materialization alone can already exceed API
+  # Gateway's hard 30-second integration timeout on a larger customer's
+  # data (confirmed happening in production for BGB -- a real user query
+  # timed out this way, even though the query itself ran fast once the
+  # container was warm). Pinging every 5 minutes -- well inside Lambda's
+  # typical idle-container retention window -- keeps one container warm
+  # continuously during normal usage, so real requests mostly land on an
+  # already-materialized container instead of paying that cost themselves.
+  # Applies to every customer's stack via this shared template, not just
+  # BGB's -- no real downside for a smaller customer like TopStep, and it
+  # only gets more relevant as any customer's data grows over time.
+  # -------------------------------------------------------
+  SppMcpKeepWarmRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "spp-mcp-keep-warm${ResourceSuffix}"
+      ScheduleExpression: "rate(5 minutes)"
+      State: ENABLED
+      Targets:
+        - Id: SppMcpServerFunction
+          Arn: !GetAtt SppMcpServerFunction.Arn
+          Input: '{"action":"keepWarm"}'
+
+  SppMcpKeepWarmPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref SppMcpServerFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt SppMcpKeepWarmRule.Arn
+
 Outputs:
   McpServerBaseUrl:
     Value: !Sub "https://${SppMcpApi}.execute-api.${AWS::Region}.amazonaws.com"

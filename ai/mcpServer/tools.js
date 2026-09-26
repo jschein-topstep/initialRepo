@@ -113,7 +113,14 @@ function registerTools(server, connection, timings, email, hasSyncedAccess) {
         "status from a query result alone; a query returning zero rows " +
         "looks identical whether the account is connected with genuinely " +
         "no access or not connected at all -- this tool is the only way " +
-        "to actually tell those apart.",
+        "to actually tell those apart. permittedProjectCount/" +
+        "permittedUserCount are what's actually queryable RIGHT NOW, with " +
+        "every restriction applied (including local rules SPP itself " +
+        "doesn't know about, like project stage); restPermittedProjectCount" +
+        "/restPermittedUserCount are what SPP's own REST API grants before " +
+        "those additional local restrictions. The two numbers legitimately " +
+        "differing is expected, not a bug or a sync problem -- it means a " +
+        "local restriction is narrowing SPP's own broader grant.",
       inputSchema: {},
     },
     wrapToolHandler(async () => {
@@ -124,11 +131,37 @@ function registerTools(server, connection, timings, email, hasSyncedAccess) {
         sppUserAuth.getSppAccessTokenForUser(email),
         filterCache.getCachedPermittedIds(email),
       ]);
+      // Queried against the already-scoped views (applyFilterScope has
+      // already run by the time any tool handler executes -- see
+      // mcp-handler.js), not the raw REST-cache length, so this reflects
+      // what's ACTUALLY queryable right now -- REST access AND every local
+      // restriction (project-stage cascading, etc.) both applied. Reading
+      // cached.projects.length here instead would silently drift from
+      // reality the moment any local-only restriction exists, which is
+      // exactly what happened in production: confirmed a real case where
+      // this reported 2,311 permitted projects while the actual scoped
+      // view (correctly) returned 1,416, entirely because of a project
+      // stage restriction SPP's own REST API has no concept of -- nothing
+      // was wrong, but the mismatch looked exactly like a sync bug.
+      const [projectCount, userCount] = cached
+        ? await Promise.all([
+            connection
+              .runAndReadAll(`SELECT COUNT(*) AS n FROM projects`)
+              .then((r) => r.getRowObjects())
+              .then((rows) => Number(rows[0].n)),
+            connection
+              .runAndReadAll(`SELECT COUNT(*) AS n FROM users`)
+              .then((r) => r.getRowObjects())
+              .then((rows) => Number(rows[0].n)),
+          ])
+        : [0, 0];
       return {
         connected: accessToken !== null,
         synced: cached !== null,
-        permittedProjectCount: cached?.projects?.length ?? 0,
-        permittedUserCount: cached?.users?.length ?? 0,
+        permittedProjectCount: projectCount,
+        permittedUserCount: userCount,
+        restPermittedProjectCount: cached?.projects?.length ?? 0,
+        restPermittedUserCount: cached?.users?.length ?? 0,
         lastSyncedAt: cached?.updatedAt
           ? new Date(cached.updatedAt * 1000).toISOString()
           : null,

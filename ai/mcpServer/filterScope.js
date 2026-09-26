@@ -1,7 +1,16 @@
-// Enforces filter-set access at the query layer: replaces "projects" and
-// "users" with views scoped to the current caller's cached permitted IDs,
-// so the agent's arbitrary SQL (execute_spp_query) is automatically scoped
-// no matter how it's written -- the agent never sees a row it shouldn't.
+// Enforces filter-set access at the query layer: replaces every scoped
+// table -- "projects"/"users"/"customers" (live, per-user REST access),
+// the static reference tables like "projectStages" (hand-curated config),
+// and every OTHER table that transitively references one of those via a
+// foreign key (a time entry whose project's stage is hidden, a booking on
+// a project the caller can't see, ...) -- with views scoped to the current
+// caller, so the agent's arbitrary SQL (execute_spp_query) is automatically
+// scoped no matter how it's written -- the agent never sees a row it
+// shouldn't, directly OR by way of something it references. Downstream
+// only: hiding a project hides things that reference the project, never
+// the (upstream) customer it belongs to. See reportEngine.js's
+// getScopingPlan for how the downstream table set and build order are
+// computed from RELATIONSHIPS.
 //
 // Why the raw materialized tables get renamed to "*_raw" rather than
 // building the view directly as "CREATE OR REPLACE VIEW projects AS SELECT
@@ -17,26 +26,44 @@
 // unshadowed source to always select from.
 
 const { getCachedPermittedIds } = require("./filterCache.js");
-const { resolveFilterSetPermittedValues } = require("./reportEngine.js");
+const {
+  resolveFilterSetPermittedValues,
+  getScopingPlan,
+} = require("./reportEngine.js");
 
 const SCOPED_RECORD_TYPES = ["projects", "users", "customers"];
 
 // Small SPP reference tables the REST API doesn't expose with filter-set
 // enforcement (unlike SCOPED_RECORD_TYPES above), so they're scoped from a
 // hand-curated static config instead of a live per-user REST fetch -- see
-// reportEngine.js's resolveFilterSetPermittedValues/filter_sets.json.
-// Extend this once a table is both synced (present in REPORT_VIEWS) AND
-// curated in filter_sets.json -- slip stage and time type are known to be
-// coming but aren't wired in yet on either side.
+// reportEngine.js's resolveFilterSetPermittedValues/report_config.json's
+// filterSets section. Extend this once a table is both synced (present in
+// REPORT_VIEWS) AND curated in filterSets -- payroll type is known to be
+// coming but isn't curated yet.
 const STATIC_SCOPED_RECORD_TYPES = [
   "bookingTypes",
   "projectStages",
   "categories",
   "items",
+  "chargeStages",
+  "timeTypes",
 ];
 
-async function ensureRawTablesRenamed(connection) {
-  const allScoped = [...SCOPED_RECORD_TYPES, ...STATIC_SCOPED_RECORD_TYPES];
+// Every table that needs enforcement, in the order it must be built: the
+// roots above, PLUS every table reportEngine.js's getScopingPlan finds
+// transitively downstream of one of them (e.g. a time entry whose project's
+// stage is hidden, per RELATIONSHIPS) -- see getScopingPlan's own comment
+// for the full reasoning. Confirmed with the user this is downstream-only:
+// hiding a project must not hide its (upstream) customer, only things that
+// reference the project. Recomputed fresh per request (cheap -- confirmed
+// via direct timing against the real relationships graph, single-digit
+// milliseconds even for the deepest/largest tables) rather than cached, so
+// it never needs separate invalidation when report_config.json changes.
+function computeScopingPlan() {
+  return getScopingPlan([...SCOPED_RECORD_TYPES, ...STATIC_SCOPED_RECORD_TYPES]);
+}
+
+async function ensureRawTablesRenamed(connection, allScoped) {
   const reader = await connection.runAndReadAll(`
     SELECT table_name FROM information_schema.tables
     WHERE table_name IN ('${allScoped.join("', '")}') AND table_type = 'BASE TABLE'
@@ -107,31 +134,14 @@ async function getPrimaryFilterSetId(connection, email) {
   }
 }
 
-// Rebuilds the "projects"/"users"/"customers" views (live, REST-cache-based)
-// AND the static reference-table views (booking type, project stage,
-// category, item -- hand-curated-config-based) for the current request.
-// Not connected yet (or no cache entry) -> the REST-scoped views resolve to
-// zero rows. No resolvable filter set, or that table not yet curated in
-// filter_sets.json -> the static-scoped views resolve to zero rows. Fail
-// closed everywhere, never fail open.
-//
-// Returns { hasSyncedAccess }: whether a REST filter cache entry exists at
-// all for this email. This matters because an empty result set looks
-// identical to the agent whether the person isn't connected/synced yet or
-// is connected with genuinely zero permitted rows -- there is no way to
-// tell those apart from query results alone. Callers use this to make that
-// distinction explicit rather than leaving the agent to guess (which it
-// will get wrong). Reflects REST-cache status only, not static-table
-// scoping -- someone can be fully connected while their primary_filter_set
-// still isn't curated in filter_sets.json, which correctly fails closed on
-// just those tables without affecting this flag.
-async function applyFilterScope(connection, email) {
-  await ensureRawTablesRenamed(connection);
-
-  const cached = email ? await getCachedPermittedIds(email) : null;
-
-  for (const recordType of SCOPED_RECORD_TYPES) {
-    const idsSql = idsListSql(cached?.[recordType]);
+// A table's own restriction, independent of anything it references: the
+// REST-cache-based clause for projects/users/customers, the static-config
+// clause for the hand-curated reference tables, or "TRUE" (no restriction
+// of its own) for a table that's only here because something ELSE cascades
+// into it.
+function baseWhereClause(table, cached, filterSetId) {
+  if (SCOPED_RECORD_TYPES.includes(table)) {
+    const idsSql = idsListSql(cached?.[table]);
     const permittedClause = idsSql ? `id IN (${idsSql})` : "FALSE";
     // Generic/service SPP user accounts (templates like "NewHire1-June",
     // not real people) are unconditionally excluded from SPP's own
@@ -143,32 +153,91 @@ async function applyFilterScope(connection, email) {
     // private data), so "users" always shows them alongside whatever's
     // permitted, bypassing the fail-closed permitted-IDs check just for
     // this flag.
-    const whereClause =
-      recordType === "users"
-        ? `(${permittedClause} OR CAST(generic AS VARCHAR) = '1')`
-        : permittedClause;
-    await connection.run(
-      `CREATE OR REPLACE VIEW "${recordType}" AS SELECT * FROM "${recordType}_raw" WHERE ${whereClause}`,
-    );
+    return table === "users"
+      ? `(${permittedClause} OR CAST(generic AS VARCHAR) = '1')`
+      : permittedClause;
   }
+  if (STATIC_SCOPED_RECORD_TYPES.includes(table)) {
+    return staticWhereClause(resolveFilterSetPermittedValues(filterSetId, table));
+  }
+  return "TRUE";
+}
 
+// Rebuilds every scoped view for the current request: the "projects"/
+// "users"/"customers" views (live, REST-cache-based), the static
+// reference-table views (booking type, project stage, category, item,
+// charge stage, time type -- hand-curated-config-based), AND every table
+// reportEngine.js's getScopingPlan finds transitively downstream of one of
+// those (e.g. a time entry whose project's stage is hidden) -- built in
+// dependency order so each table's cascade conditions can reference its
+// prerequisites' ALREADY-scoped views. Not connected yet (or no cache
+// entry) -> the REST-scoped views resolve to zero rows. No resolvable
+// filter set, or that table not yet curated -> the static-scoped views (and
+// anything cascading from them) resolve to zero rows. Fail closed
+// everywhere, never fail open.
+//
+// Returns { hasSyncedAccess }: whether a REST filter cache entry exists at
+// all for this email. This matters because an empty result set looks
+// identical to the agent whether the person isn't connected/synced yet or
+// is connected with genuinely zero permitted rows -- there is no way to
+// tell those apart from query results alone. Callers use this to make that
+// distinction explicit rather than leaving the agent to guess (which it
+// will get wrong). Reflects REST-cache status only, not static-table or
+// cascaded scoping -- someone can be fully connected while their
+// primary_filter_set still isn't curated, which correctly fails closed on
+// just the affected tables without affecting this flag.
+async function applyFilterScope(connection, email) {
+  const plan = computeScopingPlan();
+  await ensureRawTablesRenamed(connection, plan.map((step) => step.table));
+
+  const cached = email ? await getCachedPermittedIds(email) : null;
   const filterSetId = email
     ? await getPrimaryFilterSetId(connection, email)
     : null;
 
-  for (const recordType of STATIC_SCOPED_RECORD_TYPES) {
+  for (const { table, cascadeConditions } of plan) {
     // Isolated per table on purpose -- applyFilterScope runs unconditionally
     // on every request with no surrounding try/catch in mcp-handler.js, so
-    // one missing/not-yet-materialized static table (e.g. slip stage before
-    // it's synced) throwing here would otherwise break every tool call for
-    // every table, not just this one. Fail this table closed and move on.
+    // one missing/not-yet-materialized table (e.g. a newly-added table
+    // before it's synced) throwing here would otherwise break every tool
+    // call for every table, not just this one. Fail this table closed and
+    // move on -- it's built in dependency order, so a table that failed
+    // here simply won't exist for anything further downstream to reference,
+    // which itself then fails closed the same way (no silent pass-through).
     try {
-      const permitted = resolveFilterSetPermittedValues(filterSetId, recordType);
+      const base = baseWhereClause(table, cached, filterSetId);
+      // CAST both sides to VARCHAR -- an FK column and the "id" column it
+      // references aren't guaranteed to share the same DuckDB-inferred
+      // type. Confirmed happening for real: several *_id columns come back
+      // VARCHAR (DuckDB's auto-detection falls back to it the moment a
+      // column has even one non-numeric value, e.g. an empty-string
+      // sentinel among mostly-numeric ids -- the same class of thing
+      // documented at mergeIntoS3Csv/sample_size=-1 elsewhere in this
+      // project), while the referenced table's own "id" is a clean BIGINT,
+      // and DuckDB refuses to compare them without an explicit cast.
+      const cascadeClauses = cascadeConditions.map(
+        ({ column, referencesTable }) =>
+          `(CAST("${column}" AS VARCHAR) IS NULL OR CAST("${column}" AS VARCHAR) IN (SELECT CAST(id AS VARCHAR) FROM "${referencesTable}"))`,
+      );
+      const whereClause = [base, ...cascadeClauses].join(" AND ");
       await connection.run(
-        `CREATE OR REPLACE VIEW "${recordType}" AS SELECT * FROM "${recordType}_raw" WHERE ${staticWhereClause(permitted)}`,
+        `CREATE OR REPLACE VIEW "${table}" AS SELECT * FROM "${table}_raw" WHERE ${whereClause}`,
       );
     } catch (error) {
-      console.log(`Could not scope "${recordType}" -- skipping (fails closed if it existed before): ${error.message}`);
+      console.log(`Could not scope "${table}" -- failing it closed (empty), so anything that references it downstream fails closed too instead of hitting a "table does not exist" error: ${error.message}`);
+      // Best-effort fallback: an empty view under the expected name, so a
+      // broken table degrades to "shows nothing" for itself AND for
+      // whatever's built after it in the plan, rather than the primary
+      // failure above cascading into a SECOND, more confusing failure
+      // class downstream (confirmed happening: one bad relationship broke
+      // materialization for it, which then broke every table built after
+      // it in the plan with "Table with name X does not exist", instead of
+      // each one failing closed independently and visibly).
+      try {
+        await connection.run(`CREATE OR REPLACE VIEW "${table}" AS SELECT * FROM "${table}_raw" WHERE FALSE`);
+      } catch (fallbackError) {
+        console.log(`Could not even build a fail-closed empty view for "${table}": ${fallbackError.message}`);
+      }
     }
   }
 

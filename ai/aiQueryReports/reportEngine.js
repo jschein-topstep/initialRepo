@@ -296,6 +296,114 @@ function resolveFilterSetPermittedValues(filterSetId, table) {
   return null;
 }
 
+// Computes the cascade plan for downstream filter-set enforcement: given a
+// set of "root" scoped tables (each already restricted some other way --
+// either live per-user REST access, or the static filter_sets config), finds
+// every OTHER table that transitively references one of them via a foreign
+// key (per RELATIONSHIPS) and therefore must ALSO exclude rows pointing at
+// now-invisible parent records -- e.g. a project whose stage is hidden
+// hides the project, which then hides every time entry/booking/charge that
+// references THAT project, and so on. Requirement (confirmed with the
+// user): downstream-only -- hiding a project must not hide its (upstream)
+// customer, only things that reference the project.
+//
+// Returns an array, in dependency order (a table's prerequisites always
+// come before it), of { table, cascadeConditions }, where cascadeConditions
+// is [{ column, referencesTable }] -- every FK column on that table
+// pointing at another table THIS SAME PLAN also scopes. The caller ANDs
+// each condition (as "<column> IS NULL OR <column> IN (SELECT id FROM
+// <referencesTable>)", referencing that table's ALREADY-BUILT scoped view)
+// together with the table's own base restriction, if it has one (roots do;
+// purely-cascaded tables don't and get no base restriction beyond this).
+//
+// Defensive by design, since this walks hand-edited config data across a
+// warm container's whole lifetime: a relationship pointing at a table
+// that's not in REPORT_VIEWS at all (typo, or a table dropped since) is
+// silently skipped rather than crashing table materialization. Confirmed
+// via direct testing that the real relationships graph has no cycles, but
+// that's not something to trust blindly forever as report_config.json
+// keeps changing -- a genuine cycle among the remaining tables breaks it by
+// placing them with no cascade conditions (their own base restriction, if
+// any, still applies) and logging a warning, rather than looping forever.
+function getScopingPlan(rootTables) {
+  const rootSet = new Set(rootTables);
+  const knownTables = new Set(Object.keys(REPORT_VIEWS));
+
+  // sourceTable -> [{ column, targetTable }] -- only relationships between
+  // two tables this Lambda actually has materialized.
+  const outgoing = {};
+  for (const [key, ref] of Object.entries(RELATIONSHIPS)) {
+    const dotIndex = key.indexOf(".");
+    if (dotIndex === -1) continue;
+    const sourceTable = key.slice(0, dotIndex);
+    const column = key.slice(dotIndex + 1);
+    if (!knownTables.has(sourceTable) || !ref?.table || !knownTables.has(ref.table)) {
+      continue;
+    }
+    outgoing[sourceTable] = outgoing[sourceTable] || [];
+    outgoing[sourceTable].push({ column, targetTable: ref.table });
+  }
+
+  // targetTable -> Set(sourceTable) that reference it -- the reverse index,
+  // used to walk downstream from each root.
+  const dependents = {};
+  for (const [source, refs] of Object.entries(outgoing)) {
+    for (const { targetTable } of refs) {
+      dependents[targetTable] = dependents[targetTable] || new Set();
+      dependents[targetTable].add(source);
+    }
+  }
+
+  // Every table transitively downstream of a root, roots included.
+  const affected = new Set(rootSet);
+  const queue = [...rootSet];
+  while (queue.length > 0) {
+    const table = queue.shift();
+    for (const dep of dependents[table] ?? []) {
+      if (!affected.has(dep)) {
+        affected.add(dep);
+        queue.push(dep);
+      }
+    }
+  }
+
+  // Topological order via Kahn's algorithm: a table is "ready" to place
+  // once every affected table it references is already placed.
+  const remaining = new Set(affected);
+  const placed = new Set();
+  const plan = [];
+  while (remaining.size > 0) {
+    let progressed = false;
+    for (const table of [...remaining]) {
+      const refs = (outgoing[table] ?? []).filter((r) => affected.has(r.targetTable));
+      if (refs.every((r) => placed.has(r.targetTable))) {
+        plan.push({
+          table,
+          cascadeConditions: refs.map((r) => ({
+            column: r.column,
+            referencesTable: r.targetTable,
+          })),
+        });
+        placed.add(table);
+        remaining.delete(table);
+        progressed = true;
+      }
+    }
+    if (!progressed) {
+      console.error(
+        `getScopingPlan: cycle detected among [${[...remaining].join(", ")}] -- placing them with no cascade conditions applied (their own base restriction, if any, still applies).`,
+      );
+      for (const table of remaining) {
+        plan.push({ table, cascadeConditions: [] });
+        placed.add(table);
+      }
+      remaining.clear();
+    }
+  }
+
+  return plan;
+}
+
 async function getCurrentManifest() {
   const manifest = {};
 
@@ -1266,6 +1374,11 @@ Object.assign(exports, {
   // bug as destructuring a live-reassigned export anywhere else in this
   // codebase; this function always reads the current value instead).
   resolveFilterSetPermittedValues,
+  // Same reasoning as resolveFilterSetPermittedValues above -- reads
+  // RELATIONSHIPS/REPORT_VIEWS live rather than being handed a
+  // point-in-time copy, so it stays correct across a report_config.json
+  // reload without filterScope.js needing to know or care.
+  getScopingPlan,
 });
 
 function cleanRows(rows) {

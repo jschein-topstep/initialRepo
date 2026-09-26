@@ -3,7 +3,15 @@ const path = require("path");
 const { McpServer } = require("@modelcontextprotocol/sdk/server/mcp.js");
 
 const { LambdaTransport } = require("./lambda-transport.js");
-const { registerTools, setupConnection } = require("./tools.js");
+const {
+  registerTools,
+  setupConnection,
+  doCheckSppAccessStatus,
+  doSyncSppAccess,
+  textResult,
+  errorResult,
+  ToolInputError,
+} = require("./tools.js");
 const oauthEndpoints = require("./oauth-endpoints.js");
 const { applyFilterScope } = require("./filterScope.js");
 const filterCache = require("./filterCache.js");
@@ -83,6 +91,43 @@ async function handleMcpRequest(event) {
 
   const toolName = message.method === "tools/call" ? message.params?.name : undefined;
   console.log(`MCP method: ${message.method}${toolName ? ` (tool: ${toolName})` : ""}`);
+
+  // Fast path: sync_spp_access and check_spp_access_status never touch
+  // DuckDB/materialized SPP data at all -- only the OAuth token store, the
+  // filter cache, and (sync_spp_access only) a live SPP REST call -- so
+  // they're handled here, before setupConnection/applyFilterScope even
+  // run, rather than paying full-table cold-start materialization cost for
+  // no reason. tools/list still goes through the normal path below (so
+  // both tools stay fully discoverable), and registerTools still wraps the
+  // same underlying doCheckSppAccessStatus/doSyncSppAccess functions as a
+  // redundant-but-harmless fallback -- only an actual tools/call
+  // invocation of these two is intercepted here.
+  //
+  // Confirmed necessary in production, not just theoretical: on BGB (a
+  // much larger customer than TopStep), a cold container combining full
+  // materialization (~20-30s) with sync_spp_access's own SPP REST fetch
+  // consistently landed at 35-54s total -- comfortably past API Gateway's
+  // hard 30-second integration timeout, which is what actually surfaced as
+  // "Couldn't connect to the server" / a hung tool call from Claude's side.
+  if (toolName === "sync_spp_access" || toolName === "check_spp_access_status") {
+    const claims = event.requestContext?.authorizer?.jwt?.claims;
+    const email = claims?.email || claims?.username;
+    let result;
+    try {
+      result = textResult(
+        toolName === "sync_spp_access"
+          ? await doSyncSppAccess(email)
+          : await doCheckSppAccessStatus(email),
+      );
+    } catch (error) {
+      result = errorResult(
+        error instanceof ToolInputError
+          ? error.message
+          : error.message || "Unexpected error",
+      );
+    }
+    return json(200, { jsonrpc: "2.0", id: message.id, result });
+  }
 
   const region = process.env.AWS_REGION || "us-east-2";
   const connection = await setupConnection(region, timings);

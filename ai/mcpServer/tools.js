@@ -97,6 +97,58 @@ async function deleteTerminology(term) {
 // caller (from the JWT claims API Gateway validated) -- used to scope their
 // SPP connection and, indirectly via the "projects"/"users" views
 // filterScope.js already rebuilt for this request, their query results.
+// Shared with mcp-handler.js's fast path (see there for why): these two
+// tools never touch DuckDB/materialized SPP data at all -- only the OAuth
+// token store, the filter cache, and (sync_spp_access only) a live SPP
+// REST call -- so their actual logic lives here as plain functions taking
+// just `email`, callable identically whether or not a `connection` exists
+// yet. registerTools below still wraps them for the normal path (which is
+// what answers tools/list either way), but the fast path in mcp-handler.js
+// calls these directly, skipping setupConnection/applyFilterScope entirely.
+//
+// permittedProjectCount/permittedUserCount here are the raw REST-cache
+// counts (what SPP's own filter-set-scoped REST API grants), NOT the
+// further-locally-restricted count a scoped DuckDB view would show (e.g.
+// after project-stage cascading) -- deliberately, so this stays fast and
+// connection-independent. A previous version queried the scoped view for
+// a more accurate number; reverted after confirming in production that
+// doing so required full table materialization, which is exactly the
+// multi-second cold-start cost this whole fast path exists to avoid.
+async function doCheckSppAccessStatus(email) {
+  if (!email) {
+    throw new ToolInputError("Could not determine the caller's identity.");
+  }
+  const [accessToken, cached] = await Promise.all([
+    sppUserAuth.getSppAccessTokenForUser(email),
+    filterCache.getCachedPermittedIds(email),
+  ]);
+  return {
+    connected: accessToken !== null,
+    synced: cached !== null,
+    permittedProjectCount: cached?.projects?.length ?? 0,
+    permittedUserCount: cached?.users?.length ?? 0,
+    lastSyncedAt: cached?.updatedAt
+      ? new Date(cached.updatedAt * 1000).toISOString()
+      : null,
+  };
+}
+
+async function doSyncSppAccess(email) {
+  if (!email) {
+    throw new ToolInputError(
+      "Could not determine the caller's identity -- cannot sync SPP access.",
+    );
+  }
+  const ids = await sppRestClient.fetchPermittedIdsForUser(email);
+  if (!ids) {
+    throw new ToolInputError(
+      "This user hasn't connected their SPP account yet -- call connect_spp_account first.",
+    );
+  }
+  await filterCache.savePermittedIds(email, ids);
+  return { projects: ids.projects.length, users: ids.users.length };
+}
+
 function registerTools(server, connection, timings, email, hasSyncedAccess) {
   server.registerTool(
     "check_spp_access_status",
@@ -114,59 +166,14 @@ function registerTools(server, connection, timings, email, hasSyncedAccess) {
         "looks identical whether the account is connected with genuinely " +
         "no access or not connected at all -- this tool is the only way " +
         "to actually tell those apart. permittedProjectCount/" +
-        "permittedUserCount are what's actually queryable RIGHT NOW, with " +
-        "every restriction applied (including local rules SPP itself " +
-        "doesn't know about, like project stage); restPermittedProjectCount" +
-        "/restPermittedUserCount are what SPP's own REST API grants before " +
-        "those additional local restrictions. The two numbers legitimately " +
-        "differing is expected, not a bug or a sync problem -- it means a " +
-        "local restriction is narrowing SPP's own broader grant.",
+        "permittedUserCount reflect SPP's own filter-set-scoped REST " +
+        "access -- a table like Projects can still show fewer rows than " +
+        "this if an additional LOCAL restriction applies (e.g. a hidden " +
+        "project stage) that SPP's own access model has no concept of; " +
+        "that's expected, not a sync bug.",
       inputSchema: {},
     },
-    wrapToolHandler(async () => {
-      if (!email) {
-        throw new ToolInputError("Could not determine the caller's identity.");
-      }
-      const [accessToken, cached] = await Promise.all([
-        sppUserAuth.getSppAccessTokenForUser(email),
-        filterCache.getCachedPermittedIds(email),
-      ]);
-      // Queried against the already-scoped views (applyFilterScope has
-      // already run by the time any tool handler executes -- see
-      // mcp-handler.js), not the raw REST-cache length, so this reflects
-      // what's ACTUALLY queryable right now -- REST access AND every local
-      // restriction (project-stage cascading, etc.) both applied. Reading
-      // cached.projects.length here instead would silently drift from
-      // reality the moment any local-only restriction exists, which is
-      // exactly what happened in production: confirmed a real case where
-      // this reported 2,311 permitted projects while the actual scoped
-      // view (correctly) returned 1,416, entirely because of a project
-      // stage restriction SPP's own REST API has no concept of -- nothing
-      // was wrong, but the mismatch looked exactly like a sync bug.
-      const [projectCount, userCount] = cached
-        ? await Promise.all([
-            connection
-              .runAndReadAll(`SELECT COUNT(*) AS n FROM projects`)
-              .then((r) => r.getRowObjects())
-              .then((rows) => Number(rows[0].n)),
-            connection
-              .runAndReadAll(`SELECT COUNT(*) AS n FROM users`)
-              .then((r) => r.getRowObjects())
-              .then((rows) => Number(rows[0].n)),
-          ])
-        : [0, 0];
-      return {
-        connected: accessToken !== null,
-        synced: cached !== null,
-        permittedProjectCount: projectCount,
-        permittedUserCount: userCount,
-        restPermittedProjectCount: cached?.projects?.length ?? 0,
-        restPermittedUserCount: cached?.users?.length ?? 0,
-        lastSyncedAt: cached?.updatedAt
-          ? new Date(cached.updatedAt * 1000).toISOString()
-          : null,
-      };
-    }),
+    wrapToolHandler(async () => doCheckSppAccessStatus(email)),
   );
 
   server.registerTool(
@@ -222,24 +229,7 @@ function registerTools(server, connection, timings, email, hasSyncedAccess) {
         "access looks out of date.",
       inputSchema: {},
     },
-    wrapToolHandler(async () => {
-      if (!email) {
-        throw new ToolInputError(
-          "Could not determine the caller's identity -- cannot sync SPP access.",
-        );
-      }
-      const ids = await sppRestClient.fetchPermittedIdsForUser(email);
-      if (!ids) {
-        throw new ToolInputError(
-          "This user hasn't connected their SPP account yet -- call connect_spp_account first.",
-        );
-      }
-      await filterCache.savePermittedIds(email, ids);
-      return {
-        projects: ids.projects.length,
-        users: ids.users.length,
-      };
-    }),
+    wrapToolHandler(async () => doSyncSppAccess(email)),
   );
   server.registerTool(
     "get_spp_schemas",
@@ -364,4 +354,16 @@ function registerTools(server, connection, timings, email, hasSyncedAccess) {
   );
 }
 
-module.exports = { registerTools, setupConnection };
+module.exports = {
+  registerTools,
+  setupConnection,
+  // Consumed by mcp-handler.js's fast path for sync_spp_access/
+  // check_spp_access_status -- see the comment on doCheckSppAccessStatus
+  // above for why these are plain functions rather than only living inside
+  // registerTools's closures.
+  doCheckSppAccessStatus,
+  doSyncSppAccess,
+  textResult,
+  errorResult,
+  ToolInputError,
+};

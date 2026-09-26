@@ -33,12 +33,16 @@ Parameters:
 
   ClaudeRedirectUri:
     Type: String
+    Default: https://claude.ai/api/mcp/auth_callback
     Description: >
-      REQUIRED, no default on purpose -- this is the callback URL Claude.ai
-      shows you when you add this as a custom connector. Deploy once with a
-      placeholder (e.g. https://placeholder.invalid/callback) to get the
-      server up, then redeploy with the real value once you have it; nothing
-      will complete a login until this matches exactly.
+      Claude.ai's own OAuth callback endpoint -- the same fixed value for
+      every custom connector on every stack, not generated per connector and
+      not related to this stack's own MCP URL. Confirmed against TopStep's
+      already-working stack, which uses this exact value. Set once at first
+      deploy; there's no placeholder/redeploy dance needed (a previous
+      version of this comment claimed otherwise -- that was wrong, confirmed
+      when BGB's setup hit it directly). Override only if Claude.ai's own
+      callback endpoint ever changes.
 
   McpServerImageUri:
     Type: String
@@ -160,7 +164,34 @@ Resources:
         ImageUri: !Ref McpServerImageUri
       Role: !Ref LambdaExecutionRoleArn
       Timeout: 60
-      MemorySize: 1024
+      MemorySize: 3008 # bumped from 1024 -- this is also this AWS account's
+                       # actual Lambda memory ceiling right now, confirmed
+                       # by testing: 10240 (Lambda's own general maximum) is
+                       # rejected here with "value failed to satisfy
+                       # constraint: Member must have value less than or
+                       # equal to 3008", an account-level quota, not
+                       # something this template controls.
+                       #
+                       # AWS Lambda allocates CPU proportional to memory,
+                       # and this Lambda's cold-start table materialization
+                       # (DuckDB CSV parsing) is CPU-bound, not I/O-bound --
+                       # confirmed by testing:
+                       # running materialization concurrently (either on one
+                       # connection, which just serializes internally, or on
+                       # separate connections to the same shared instance)
+                       # gave ZERO speedup and sometimes made it slower
+                       # (contention), so parallelizing isn't the fix; more
+                       # CPU per table is. Matters far more for a
+                       # larger-data customer than for TopStep itself: this
+                       # API Gateway integration has a HARD 30-second
+                       # timeout (AWS's own platform maximum for HTTP APIs,
+                       # not something raising this Lambda's own Timeout
+                       # above can work around) -- confirmed happening in
+                       # production for BGB, whose larger tables alone
+                       # (e.g. one table took 14.5s at 1024 MB) blew well
+                       # past that cap on the very first "initialize" call,
+                       # which is what a Claude.ai connector add actually
+                       # sees as "Couldn't connect to the server."
       # No Layers here -- AWS does not support Lambda Layers on
       # PackageType: Image functions at all. oauthUtils.mjs/sharedUtils.js
       # (normally attached via the "sharedUtils" layer) are instead COPY'd

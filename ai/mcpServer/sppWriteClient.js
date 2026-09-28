@@ -117,43 +117,121 @@ class SppWriteRejectedError extends Error {
   }
 }
 
+// Redacts the two credential values that appear in every write XML request
+// (the company-level API key in <request key="...">, and the caller's own
+// per-user OAuth access_token) to a partial, comparable form -- enough to
+// tell "is this the same key as last time" or "is this empty" while
+// debugging, without putting a usable secret into CloudWatch. Neither
+// value is sensitive-shaped enough to need full redaction-with-no-info, but
+// there's no reason to log either one in full either.
+function redactSecret(value) {
+  if (!value) return "(empty)";
+  if (value.length <= 8) return `[REDACTED len=${value.length}]`;
+  return `${value.slice(0, 4)}...${value.slice(-4)} [REDACTED len=${value.length}]`;
+}
+
+function redactXmlForLogging(xml) {
+  return xml
+    .replace(/key="[^"]*"/, (m) => `key="${redactSecret(m.slice(5, -1))}"`)
+    .replace(/<access_token>[^<]*<\/access_token>/, (m) => `<access_token>${redactSecret(m.slice(14, -15))}</access_token>`);
+}
+
 // Sends the built XML request and returns SPP's parsed response node on
-// success. IMPORTANT, unverified from any code read while designing this
-// (neither tslib-putRecords.mjs nor tslib-deleteRecords.mjs handle it --
-// they only ever exercised the HTTP-failure and well-formed-success paths):
-// the exact shape of a 200-status response where the WRITE ITSELF was
-// rejected server-side (a role-permission denial, a validation error) is
-// unknown. This function is deliberately conservative -- anything that
-// isn't a recognizable success shape is treated as a rejection rather than
-// assumed to be success -- but the rejection-detection logic here MUST be
-// confirmed against a real SPP response (see the write-feature rollout
-// plan's step 5, a manual scripted test against the demo account) before
-// being trusted in production. Do not treat this as settled behavior.
-async function sendXmlRequest(xmlUrl, xml) {
-  const response = await fetch(xmlUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/xml" },
-    body: xml,
-  });
-  const text = await response.text();
+// success.
+//
+// CONFIRMED in production (2026-09-28): SPP embeds its OWN error codes
+// inside an HTTP 200 response rather than using a non-2xx status --
+// observed a genuine rejection ("The namespace and key do not match",
+// SPP's own @_status="505") come back as a normal 200. The original
+// version of this function only checked response.ok and "does a <response>
+// element exist at all," so that error passed both checks and was reported
+// to the caller as a successful write. Fixed by requiring the SPECIFIC
+// success shape for the action actually requested (response.Add[sppType],
+// response.Modify[sppType], or response.Delete) -- anything else, success
+// HTTP status or not, is now treated as a rejection and its actual error
+// text is surfaced rather than silently passed through.
+//
+// The full request (credentials redacted) and raw response are logged
+// unconditionally, not just on error -- added specifically to debug a
+// reproducible "namespace and key do not match" failure (2026-09-28) that
+// the person reported was NOT happening with other writes (a projects
+// update) shortly before, so seeing the exact request shape/timing across
+// both a working and a failing call is the point, not just capturing
+// failures after the fact.
+//
+// Retries a specific, CONFIRMED-transient failure shape (2026-09-28): a
+// bare <response status="505">The namespace and key do not match</response>
+// with no <Auth>/<Add>/<Modify>/<Delete> child at all -- proven transient by
+// sending the exact same (byte-for-byte identical, same credentials) request
+// four times in under a minute: 3 succeeded, 1 failed this way. That shape
+// specifically means SPP rejected the request at its own auth/session layer
+// BEFORE any write processing happened -- nothing was created, so retrying
+// is safe, unlike a genuine validation rejection (which comes back as a
+// real <Add status="1">...</Add> with no nested record, a DIFFERENT shape,
+// deliberately NOT retried below since retrying can't fix bad data and
+// would just delay surfacing the real problem). Not a generalized "retry
+// anything" -- only this exact "no action node at all" shape qualifies.
+const TRANSIENT_RETRY_ATTEMPTS = 3;
+const TRANSIENT_RETRY_DELAY_MS = 400;
 
-  if (!response.ok) {
-    throw new SppWriteRejectedError(`SPP request failed [${response.status}]: ${text}`, text);
-  }
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
+async function sendXmlRequest(xmlUrl, xml, { action, sppType }) {
   const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
-  let parsed;
-  try {
-    parsed = parser.parse(text);
-  } catch (error) {
-    throw new SppWriteRejectedError(`Could not parse SPP's response: ${error.message}`, text);
-  }
 
-  const responseNode = parsed?.response;
-  if (!responseNode) {
-    throw new SppWriteRejectedError(`Unexpected SPP response shape: ${text}`, text);
+  for (let attempt = 1; attempt <= TRANSIENT_RETRY_ATTEMPTS; attempt++) {
+    console.log(
+      `SPP XML write request (attempt ${attempt}/${TRANSIENT_RETRY_ATTEMPTS}, action=${action}, sppType=${sppType}, url=${xmlUrl}): ${redactXmlForLogging(xml)}`,
+    );
+
+    const response = await fetch(xmlUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/xml" },
+      body: xml,
+    });
+    const text = await response.text();
+
+    console.log(
+      `SPP XML write response (attempt ${attempt}/${TRANSIENT_RETRY_ATTEMPTS}, action=${action}, sppType=${sppType}, httpStatus=${response.status}): ${text}`,
+    );
+
+    if (!response.ok) {
+      throw new SppWriteRejectedError(`SPP request failed [${response.status}]: ${text}`, text);
+    }
+
+    let parsed;
+    try {
+      parsed = parser.parse(text);
+    } catch (error) {
+      throw new SppWriteRejectedError(`Could not parse SPP's response: ${error.message}`, text);
+    }
+
+    const responseNode = parsed?.response;
+    if (!responseNode) {
+      throw new SppWriteRejectedError(`Unexpected SPP response shape: ${text}`, text);
+    }
+
+    const successNode =
+      action === "create" ? responseNode.Add?.[sppType] : action === "update" ? responseNode.Modify?.[sppType] : responseNode.Delete;
+
+    if (successNode !== undefined) {
+      return successNode;
+    }
+
+    const isBareAuthLayerFailure =
+      responseNode.Add === undefined && responseNode.Modify === undefined && responseNode.Delete === undefined;
+
+    if (isBareAuthLayerFailure && attempt < TRANSIENT_RETRY_ATTEMPTS) {
+      console.log(`Transient-shaped SPP rejection on attempt ${attempt} -- retrying after ${TRANSIENT_RETRY_DELAY_MS}ms.`);
+      await sleep(TRANSIENT_RETRY_DELAY_MS);
+      continue;
+    }
+
+    const errorDetail = responseNode["#text"] ?? responseNode["@_status"] ?? JSON.stringify(responseNode);
+    throw new SppWriteRejectedError(`SPP rejected the request: ${errorDetail}`, text);
   }
-  return responseNode;
 }
 
 let cachedCredentials = null;

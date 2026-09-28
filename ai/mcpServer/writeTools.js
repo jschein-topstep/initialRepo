@@ -35,6 +35,19 @@ function sqlQuote(value) {
   return `'${String(value).replace(/'/g, "''")}'`;
 }
 
+// propose_spp_write/execute_spp_write previously logged nothing beyond the
+// bare tool name (from mcp-handler.js's generic "MCP method: tools/call"
+// line) -- every other tool logs its actual outcome (see reportEngine.js's
+// "Query executed: ..." line for execute_spp_query), so this was a real gap:
+// tracing what happened to a real write required falling back to scanning
+// the sppWriteAudit DynamoDB table directly instead of just reading
+// CloudWatch. One line per outcome, matching that same style.
+function logWriteOutcome(tool, status, { email, table, action, recordId, detail }) {
+  const recordPart = recordId !== undefined && recordId !== null ? ` recordId=${recordId}` : "";
+  const detailPart = detail ? ` -- ${detail}` : "";
+  console.log(`${tool}: ${status} -- table=${table} action=${action}${recordPart} email=${email}${detailPart}`);
+}
+
 async function resolveCallerUserId(connection, email) {
   try {
     const reader = await connection.runAndReadAll(`
@@ -170,6 +183,7 @@ async function doProposeSppWrite(connection, email, writableTables, { table, act
       reason: permission.reason,
       roleId: permission.roleId,
     });
+    logWriteOutcome("propose_spp_write", "rejected", { email, table, action, recordId, detail: permission.reason });
     return { status: "rejected", proposalToken: null, description: null, reason: permission.reason, expiresAt: null };
   }
 
@@ -187,6 +201,7 @@ async function doProposeSppWrite(connection, email, writableTables, { table, act
     (Math.floor(Date.now() / 1000) + sppWriteStore.PROPOSAL_TTL_SECONDS) * 1000,
   ).toISOString();
 
+  logWriteOutcome("propose_spp_write", "proposed", { email, table, action, recordId, detail: `proposalToken=${proposalId}` });
   return { status: "proposed", proposalToken: proposalId, description, reason: null, expiresAt };
 }
 
@@ -195,6 +210,7 @@ async function doExecuteSppWrite(connection, email, { proposalToken }) {
 
   const proposal = await sppWriteStore.getProposal(proposalToken);
   if (!proposal) {
+    console.log(`execute_spp_write: expired -- proposalToken=${proposalToken} email=${email} -- not found`);
     return {
       status: "expired",
       recordId: null,
@@ -207,6 +223,13 @@ async function doExecuteSppWrite(connection, email, { proposalToken }) {
   // resolved one way or another -- return that outcome directly rather than
   // re-running (and potentially re-executing) anything.
   if (proposal.status !== "proposed") {
+    logWriteOutcome("execute_spp_write", `${proposal.status} (replay)`, {
+      email,
+      table: proposal.table,
+      action: proposal.action,
+      recordId: proposal.recordId,
+      detail: `proposalToken=${proposalToken}`,
+    });
     return {
       status: proposal.status,
       recordId: proposal.recordId ?? null,
@@ -221,6 +244,13 @@ async function doExecuteSppWrite(connection, email, { proposalToken }) {
   const now = Math.floor(Date.now() / 1000);
   if (proposal.ttl && now > proposal.ttl) {
     // Safety net ahead of DynamoDB's own (not-instant) TTL sweep.
+    logWriteOutcome("execute_spp_write", "expired", {
+      email,
+      table: proposal.table,
+      action: proposal.action,
+      recordId: proposal.recordId,
+      detail: `proposalToken=${proposalToken}`,
+    });
     return {
       status: "expired",
       recordId: null,
@@ -237,6 +267,7 @@ async function doExecuteSppWrite(connection, email, { proposalToken }) {
   const permission = await sppWritePermissions.checkAllLayers({ connection, email, table, action, recordId, fields });
   if (!permission.allowed) {
     await sppWriteStore.markRejectedByUs(proposalToken, permission.reason);
+    logWriteOutcome("execute_spp_write", "rejected_by_us", { email, table, action, recordId, detail: permission.reason });
     return { status: "rejected_by_us", recordId: null, sppResponse: null, message: permission.reason };
   }
 
@@ -245,6 +276,7 @@ async function doExecuteSppWrite(connection, email, { proposalToken }) {
   if (!fieldMap) {
     const reason = `No SPP field mapping found for "${table}" -- check master.csv/report_config.json.`;
     await sppWriteStore.markRejectedByUs(proposalToken, reason);
+    logWriteOutcome("execute_spp_write", "rejected_by_us", { email, table, action, recordId, detail: reason });
     return { status: "rejected_by_us", recordId: null, sppResponse: null, message: reason };
   }
 
@@ -252,6 +284,7 @@ async function doExecuteSppWrite(connection, email, { proposalToken }) {
   if (!accessToken) {
     const reason = "Your SPP account isn't connected -- connect your SPP account and call sync_spp_access first.";
     await sppWriteStore.markRejectedByUs(proposalToken, reason);
+    logWriteOutcome("execute_spp_write", "rejected_by_us", { email, table, action, recordId, detail: reason });
     return { status: "rejected_by_us", recordId: null, sppResponse: null, message: reason };
   }
 
@@ -261,6 +294,7 @@ async function doExecuteSppWrite(connection, email, { proposalToken }) {
   } catch (error) {
     const reason = `Could not load SPP write credentials: ${error.message}`;
     await sppWriteStore.markRejectedByUs(proposalToken, reason);
+    logWriteOutcome("execute_spp_write", "rejected_by_us", { email, table, action, recordId, detail: reason });
     return { status: "rejected_by_us", recordId: null, sppResponse: null, message: reason };
   }
 
@@ -298,12 +332,18 @@ async function doExecuteSppWrite(connection, email, { proposalToken }) {
   } catch (error) {
     const reason = `Could not build the SPP request: ${error.message}`;
     await sppWriteStore.markRejectedByUs(proposalToken, reason);
+    logWriteOutcome("execute_spp_write", "rejected_by_us", { email, table, action, recordId, detail: reason });
     return { status: "rejected_by_us", recordId: null, sppResponse: null, message: reason };
   }
 
-  let responseNode;
+  let resultNode;
   try {
-    responseNode = await sppWriteClient.sendXmlRequest(credentials.xmlUrl, xml);
+    // sendXmlRequest requires the exact success shape for this action
+    // (response.Add[sppType] / .Modify[sppType] / .Delete) and throws
+    // SppWriteRejectedError for anything else, success-looking HTTP status
+    // or not -- see its own comment for the real SPP behavior that made
+    // this necessary (a 200 response carrying SPP's own embedded error).
+    resultNode = await sppWriteClient.sendXmlRequest(credentials.xmlUrl, xml, { action, sppType: fieldMap.sppType });
   } catch (error) {
     await sppWriteStore.markRejectedBySpp(proposalToken, error.rawResponse ?? error.message);
     // Distinctly named for log-search visibility -- this is the "two
@@ -315,13 +355,12 @@ async function doExecuteSppWrite(connection, email, { proposalToken }) {
     return { status: "rejected_by_spp", recordId: null, sppResponse: null, message: error.message };
   }
 
-  const resultNode =
-    responseNode.Add?.[fieldMap.sppType] ?? responseNode.Modify?.[fieldMap.sppType] ?? responseNode.Delete ?? responseNode;
   const resultRecordId = action === "create" ? (resultNode?.id ?? null) : recordId;
 
   await sppWriteStore.markExecuted(proposalToken, { recordId: resultRecordId, sppResponse: resultNode });
   await sppWriteClient.triggerResync(fieldMap.sourceFile);
 
+  logWriteOutcome("execute_spp_write", "executed", { email, table, action, recordId: resultRecordId });
   return { status: "executed", recordId: resultRecordId, sppResponse: resultNode, message: `${action} succeeded.` };
 }
 

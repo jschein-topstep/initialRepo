@@ -23,6 +23,13 @@ const {
 const sppUserAuth = require("./sppUserAuth.js");
 const sppRestClient = require("./sppRestClient.js");
 const filterCache = require("./filterCache.js");
+// registerWriteTools takes wrapToolHandler as a parameter rather than
+// requiring this file back (writeTools.js needing textResult/errorResult/
+// wrapToolHandler, all defined below) -- this file already requires
+// writeTools.js, so a require in the other direction would be circular and
+// resolve to an incomplete module.exports (this file's own exports aren't
+// populated until the very bottom of this file).
+const { registerWriteTools } = require("./writeTools.js");
 
 const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const TERMS_TABLE = process.env.TERMS_TABLE;
@@ -352,6 +359,8 @@ function registerTools(server, connection, timings, email, hasSyncedAccess) {
     },
     wrapToolHandler(async ({ term }) => deleteTerminology(term)),
   );
+
+  registerWriteTools(server, connection, email, wrapToolHandler);
 }
 
 module.exports = {

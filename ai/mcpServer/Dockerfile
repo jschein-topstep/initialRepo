@@ -35,4 +35,12 @@ COPY ai/mcpServer/sppRestClient.js ${LAMBDA_TASK_ROOT}
 COPY ai/mcpServer/filterCache.js ${LAMBDA_TASK_ROOT}
 COPY ai/mcpServer/filterScope.js ${LAMBDA_TASK_ROOT}
 
+# AI-initiated SPP writes (propose_spp_write/execute_spp_write) -- see the
+# write-feature implementation plan for how these fit together.
+COPY ai/mcpServer/masterConfig.js ${LAMBDA_TASK_ROOT}
+COPY ai/mcpServer/sppWriteClient.js ${LAMBDA_TASK_ROOT}
+COPY ai/mcpServer/sppWritePermissions.js ${LAMBDA_TASK_ROOT}
+COPY ai/mcpServer/sppWriteStore.js ${LAMBDA_TASK_ROOT}
+COPY ai/mcpServer/writeTools.js ${LAMBDA_TASK_ROOT}
+
 CMD [ "mcp-handler.handler" ]

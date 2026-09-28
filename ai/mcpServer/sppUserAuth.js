@@ -27,8 +27,18 @@ const OAUTH_CONFIG_TABLE = process.env.OAUTH_CONFIG_TABLE || "oauth_config";
 // The already-registered SPP application this reuses -- see module comment.
 const BASE_SPP_CONFIG_KEY = process.env.SPP_BASE_OAUTH_CONFIG_KEY || "spp-top step-prod";
 
+// Keyed on BASE_SPP_CONFIG_KEY (per-deployment, via SPP_BASE_OAUTH_CONFIG_KEY),
+// not a fixed string -- this used to hardcode "spp-top-step-user-" regardless
+// of which deployment ran it, so every deployment (TopStep, BGB, any new
+// customer) computed the SAME row for the same email. Confirmed happening in
+// production: a TopStep staff email that had already connected to TopStep's
+// own SPP instance got silently handed TopStep's authorization link when
+// connecting through an unrelated demo account's connector instead, because
+// ensurePerUserOAuthConfig found that pre-existing row first (it's
+// deliberately idempotent) and reused it instead of creating a new one for
+// this deployment.
 function perUserIntegrationKey(email) {
-  return `spp-top-step-user-${email.toLowerCase().trim()}`;
+  return `${BASE_SPP_CONFIG_KEY}-user-${email.toLowerCase().trim()}`;
 }
 
 let cachedBaseConfig = null;

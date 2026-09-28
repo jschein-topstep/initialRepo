@@ -66,6 +66,19 @@ let FIELD_VALUES = {};
 // exists here, rather than this Lambda refusing to start.
 let FILTER_SETS = {};
 
+// Per-role CRUD write permissions, keyed by role id (string) -- see
+// resolveRolePermission below. Same "missing means fail closed" philosophy
+// as FILTER_SETS: an un-curated role or table permits nothing rather than
+// this Lambda refusing to start or silently allowing a write.
+let ROLE_PERMISSIONS = {};
+
+// reportViews' raw pre-transform mapping (viewName -> bare SPP-side source
+// file name, e.g. "timeEntries" -> "task"), kept alongside REPORT_VIEWS
+// (which rewrites those same values into full S3 paths) since the write
+// path needs the bare name to look up master.csv's field mapping and the
+// SPP XML recordType, not an S3 path.
+let SOURCE_FILES = {};
+
 const REPORT_CONFIG_PATH = `${basePath}/_config/report_config.json`;
 
 // --- Connection + materialization caching ---------------------------------
@@ -232,13 +245,15 @@ async function loadReportConfig(connection) {
       `${basePath}/sync/${sourceFile}.csv`,
     ]),
   );
+  SOURCE_FILES = { ...parsed.reportViews };
   DATE_COLUMNS = parsed.dateColumns ?? {};
   RELATIONSHIPS = parsed.relationships ?? {};
   FIELD_VALUES = parsed.fieldValues ?? {};
   FILTER_SETS = parsed.filterSets ?? {};
+  ROLE_PERMISSIONS = parsed.rolePermissions ?? {};
 
   console.log(
-    `Loaded report_config.json: ${Object.keys(REPORT_VIEWS).length} views, ${Object.keys(FILTER_SETS).length} filter set(s)`,
+    `Loaded report_config.json: ${Object.keys(REPORT_VIEWS).length} views, ${Object.keys(FILTER_SETS).length} filter set(s), ${Object.keys(ROLE_PERMISSIONS).length} role(s) with write permissions`,
   );
 }
 
@@ -294,6 +309,75 @@ function resolveFilterSetPermittedValues(filterSetId, table) {
     return permitted;
   }
   return null;
+}
+
+// Resolves whether a given SPP role may perform a given write action
+// (create/update/delete -- "read" is also present in the data but this
+// pipeline enforces read-visibility separately via filter sets, not role
+// permissions) on a given table, from the already-loaded ROLE_PERMISSIONS.
+// Same fail-closed philosophy as resolveFilterSetPermittedValues: no role
+// id, an unknown role, a table not curated for that role, or anything other
+// than a literal 1 all deny -- an incomplete or stale rolePermissions
+// section must never silently grant a write.
+function resolveRolePermission(roleId, table, action) {
+  if (roleId === null || roleId === undefined || roleId === "") {
+    return false;
+  }
+  const role = ROLE_PERMISSIONS[String(roleId)];
+  if (!role || !role.permissions) {
+    return false;
+  }
+  const permission = role.permissions[table];
+  if (!permission) {
+    return false;
+  }
+  return Number(permission[action]) === 1;
+}
+
+// Bare SPP-side source file/table name for a view (e.g. "task" for
+// "timeEntries") -- the write path needs this to look up master.csv's field
+// mapping and the SPP XML recordType; REPORT_VIEWS itself only holds the
+// already-expanded S3 path. Returns null for an unknown view.
+function getSourceFile(viewName) {
+  return SOURCE_FILES[viewName] ?? null;
+}
+
+// Date-typed column names for a view, as curated in report_config.json's
+// dateColumns section -- the write path uses this to decide which fields
+// need SPP's nested <Date><year>/<month>/<day></Date> XML wrapping instead
+// of a plain text value. Always an array, never undefined.
+function getDateColumns(viewName) {
+  return DATE_COLUMNS[viewName] ?? [];
+}
+
+// Every view this company's report_config.json declares -- the write path
+// uses this to build its table enum dynamically per company/request rather
+// than hardcoding a table list in code, so a company's actual synced table
+// set is always the authority on what's writable-by-name, with no code
+// change needed when it changes.
+function getAllViewNames() {
+  return Object.keys(REPORT_VIEWS);
+}
+
+// Every outgoing FK relationship declared FOR this table (i.e. every
+// RELATIONSHIPS key of the form "table.column"), as [{column,
+// referencesTable}]. Used by the write path's generic create-time
+// visibility check: rather than a hand-maintained per-table function map,
+// it walks whatever this table actually references (per the SAME
+// relationships data getScopingPlan already uses for read-side cascade
+// scoping) and checks each one against the caller's own scoped view. A
+// table with no outgoing relationships (e.g. customers, which nothing
+// else's RELATIONSHIPS entries have it referencing FROM) simply gets no
+// create-time visibility check -- role permission alone gates it, which is
+// the correct outcome: there's no existing related record to hide behind.
+function getRelationshipsForTable(table) {
+  const prefix = `${table}.`;
+  return Object.entries(RELATIONSHIPS)
+    .filter(([key]) => key.startsWith(prefix))
+    .map(([key, value]) => ({
+      column: key.slice(prefix.length),
+      referencesTable: value.table,
+    }));
 }
 
 // Computes the cascade plan for downstream filter-set enforcement: given a
@@ -1379,6 +1463,15 @@ Object.assign(exports, {
   // point-in-time copy, so it stays correct across a report_config.json
   // reload without filterScope.js needing to know or care.
   getScopingPlan,
+  // Consumed by ai/mcpServer/sppWritePermissions.js (role-based write
+  // gating) and ai/mcpServer/sppWriteClient.js (source-file/date-column
+  // lookups for building SPP XML write requests) -- same live-read
+  // reasoning as the two exports above.
+  resolveRolePermission,
+  getSourceFile,
+  getDateColumns,
+  getAllViewNames,
+  getRelationshipsForTable,
 });
 
 function cleanRows(rows) {

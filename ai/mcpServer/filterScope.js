@@ -108,6 +108,27 @@ function staticWhereClause(permitted) {
   return "FALSE";
 }
 
+// Same lookup as getPrimaryFilterSetId below, for the caller's role_id
+// instead of their primary_filter_set -- used by sppWritePermissions.js to
+// gate write actions via reportEngine.resolveRolePermission. Same
+// fail-closed-to-null reasoning: an unresolved role is exactly the case
+// resolveRolePermission already treats as "deny".
+async function getUserRoleId(connection, email) {
+  try {
+    const reader = await connection.runAndReadAll(`
+      SELECT CAST(role_id AS VARCHAR) AS role_id
+      FROM users_raw
+      WHERE lower(CAST(email AS VARCHAR)) = lower(${sqlQuote(email)})
+      LIMIT 1
+    `);
+    const rows = await reader.getRowObjects();
+    return rows.length ? rows[0].role_id : null;
+  } catch (error) {
+    console.log(`Could not resolve role_id for ${email}: ${error.message}`);
+    return null;
+  }
+}
+
 // Looks up the caller's own primary_filter_set from the just-renamed
 // users_raw table (not the "users" view -- scoping it comes later in
 // applyFilterScope, and self-referencing it would hit the exact same
@@ -215,9 +236,22 @@ async function applyFilterScope(connection, email) {
       // documented at mergeIntoS3Csv/sample_size=-1 elsewhere in this
       // project), while the referenced table's own "id" is a clean BIGINT,
       // and DuckDB refuses to compare them without an explicit cast.
+      //
+      // "0" is treated as a second "not set" sentinel alongside real NULL --
+      // confirmed happening in production (2026-09-27): SPP represents an
+      // unset FK on some records as a literal 0 rather than NULL (e.g. a
+      // charge that hasn't been invoiced yet has invoice_id=0, not NULL --
+      // confirmed against real data, 265 of 6515 charges on one account).
+      // Without this, those charges vanished entirely: the cascade condition
+      // required invoice_id to either be NULL or match a real invoice's id,
+      // and no invoice has id 0, so "not yet invoiced" was indistinguishable
+      // from "invoiced by a since-deleted/invisible invoice" and failed
+      // closed. Every table's real ids observed so far start at 1, never 0,
+      // so this is a safe platform-wide convention to special-case, not
+      // something that risks hiding a legitimately-zero-id row.
       const cascadeClauses = cascadeConditions.map(
         ({ column, referencesTable }) =>
-          `(CAST("${column}" AS VARCHAR) IS NULL OR CAST("${column}" AS VARCHAR) IN (SELECT CAST(id AS VARCHAR) FROM "${referencesTable}"))`,
+          `(CAST("${column}" AS VARCHAR) IS NULL OR CAST("${column}" AS VARCHAR) = '0' OR CAST("${column}" AS VARCHAR) IN (SELECT CAST(id AS VARCHAR) FROM "${referencesTable}"))`,
       );
       const whereClause = [base, ...cascadeClauses].join(" AND ");
       await connection.run(
@@ -248,4 +282,9 @@ module.exports = {
   applyFilterScope,
   SCOPED_RECORD_TYPES,
   STATIC_SCOPED_RECORD_TYPES,
+  // Consumed by ai/mcpServer/sppWritePermissions.js for role-based write
+  // gating -- exported directly (unlike getPrimaryFilterSetId, which is
+  // only ever needed internally by applyFilterScope itself) since the write
+  // path needs it independently, outside the normal scoping pass.
+  getUserRoleId,
 };

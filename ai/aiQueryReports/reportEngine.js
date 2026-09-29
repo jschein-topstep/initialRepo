@@ -746,12 +746,12 @@ async function materializeOneTable(connection, viewName) {
   }
 }
 
-async function setupConnection(region, timings) {
+async function setupConnection(region, timings, { forceStalenessCheck = false } = {}) {
   const now = Date.now();
 
   if (cachedConnection) {
     const dueForStalenessCheck =
-      now - lastStalenessCheckAt >= STALENESS_CHECK_INTERVAL_MS;
+      forceStalenessCheck || now - lastStalenessCheckAt >= STALENESS_CHECK_INTERVAL_MS;
 
     if (!dueForStalenessCheck) {
       timings.connectionSource = "cached (no staleness check due)";

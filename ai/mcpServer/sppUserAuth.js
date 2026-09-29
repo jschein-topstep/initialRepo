@@ -96,9 +96,17 @@ async function ensurePerUserOAuthConfig(email) {
           // Per-row, not a global env var on tslib-exchangeCodeForTokens --
           // that Lambda is shared with other, unrelated company-level SPP
           // integrations, and a global redirect would send THEIR completed
-          // logins to Claude.ai too. exchangeCodeForTokens.mjs checks this
-          // field before falling back to its global default.
-          success_redirect_uri: "https://claude.ai/",
+          // logins here too. exchangeCodeForTokens.mjs checks this field
+          // before falling back to its global default.
+          //
+          // A neutral static confirmation page, not claude.ai -- redirecting
+          // to a fresh claude.ai tab never actually made sense: the person
+          // completing this SPP login already has the real conversation open
+          // in whatever tab/app they started this from (Claude, and in the
+          // future potentially ChatGPT or any other MCP client), and a bare
+          // "https://claude.ai/" redirect just dumped them on a new,
+          // unrelated Claude session instead of back where they came from.
+          success_redirect_uri: "https://topstep-ai-offering.s3.us-east-2.amazonaws.com/static/spp-connected.html",
         }),
         ConditionExpression: "attribute_not_exists(pk)",
       }),

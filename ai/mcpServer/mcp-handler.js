@@ -229,12 +229,34 @@ async function handleKeepWarm() {
   return { statusCode: 200, body: JSON.stringify({ warmedInMs: Date.now() - t0 }) };
 }
 
+// Invoked directly (same bypass-API-Gateway mechanism as the two actions
+// above) with {"action": "forceRefresh"} -- manually forces the staleness
+// check that would otherwise only run once every STALENESS_CHECK_INTERVAL_MS
+// (5 minutes) on a warm container, so a report_config.json/CSV edit takes
+// effect immediately instead of waiting out that interval. Only reaches
+// WHICHEVER container this particular invoke happens to land on -- under
+// real concurrent traffic there could be more than one warm container, and
+// this doesn't force the others -- but for the low-traffic case this exists
+// for (an admin actively testing a config change) that's not a practical
+// issue in practice. A cold container just does its normal cold start,
+// since there's no staleness check to force yet.
+async function handleForceRefresh() {
+  const region = process.env.AWS_REGION || "us-east-2";
+  const timings = {};
+  const t0 = Date.now();
+  await setupConnection(region, timings, { forceStalenessCheck: true });
+  return { statusCode: 200, body: JSON.stringify({ tookMs: Date.now() - t0, ...timings }) };
+}
+
 exports.handler = async (event) => {
   if (event.action === "refreshFilterCache") {
     return await handleRefreshFilterCache();
   }
   if (event.action === "keepWarm") {
     return await handleKeepWarm();
+  }
+  if (event.action === "forceRefresh") {
+    return await handleForceRefresh();
   }
 
   const method = event.requestContext?.http?.method;

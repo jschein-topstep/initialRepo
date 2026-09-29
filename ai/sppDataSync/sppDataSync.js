@@ -167,6 +167,18 @@ function syncStateKey(integrationKey, localTable) {
 // giving a full load on a table's first-ever run.
 const EPOCH_START = { year: 2000, month: 1, day: 1 };
 
+// Safety margin subtracted from the committed watermark before it's sent to
+// SPP as the "newer-than" cutoff. Confirmed in production (2026-09-29,
+// top-step "timesheet" id 18292): SPP's own updated-field filter can simply
+// fail to surface a record that objectively matches -- every scheduled run
+// still completed without error and correctly advanced the watermark right
+// past it, for about 40 hours, with no periodic reconciliation to catch the
+// miss. Always re-asking for a few extra days of already-synced data is
+// cheap and safe -- mergeIntoS3Csv upserts by id -- so this never trusts
+// SPP's filter to be complete right at the exact watermark boundary.
+const WATERMARK_OVERLAP_DAYS = 2;
+const WATERMARK_OVERLAP_SECONDS = WATERMARK_OVERLAP_DAYS * 24 * 60 * 60;
+
 function epochToDateParts(epochSeconds) {
   const d = new Date(epochSeconds * 1000);
   return {
@@ -636,8 +648,14 @@ async function runTableSync({
     integrationKey,
     localTable,
   );
+  // See WATERMARK_OVERLAP_SECONDS -- always query a bit further back than
+  // the literal committed watermark, so a record SPP's own filter misses on
+  // one run still gets a real chance to be picked up on a later one instead
+  // of being permanently skipped the moment the watermark advances past it.
   const watermark =
-    lastSyncedAt != null ? epochToDateParts(lastSyncedAt) : EPOCH_START;
+    lastSyncedAt != null
+      ? epochToDateParts(lastSyncedAt - WATERMARK_OVERLAP_SECONDS)
+      : EPOCH_START;
 
   const backfill = existingBackfill ?? {
     // Fixed once, at the start of the FIRST attempt at this backfill --

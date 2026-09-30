@@ -1,3 +1,11 @@
+// =============================================================================
+// NOTE (9/21): We were asked to remove the SharePoint/Teams "Team" logic for
+// now. All Team-related code (Team creation, creation polling, owner lookup
+// for the Team, Team ID writeback to SPP, and Team mentions in the owner
+// email) has been COMMENTED OUT rather than deleted, in case we need it again.
+// Search for "TEAM LOGIC DISABLED" to find every spot that was changed.
+// =============================================================================
+
 import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
 
 const lambdaClient = new LambdaClient({ region: "us-east-2" });
@@ -5,50 +13,157 @@ const sharedPath = process.env.AWS_LAMBDA_FUNCTION_NAME
   ? "/opt/nodejs/sharedUtils.js"
   : "../../shared/sharedUtils.js";
 const { callSharedUtil } = await import(sharedPath);
-//may not need spp creds
-/*const authObj = {
+
+// SPP credentials, pulled from Lambda environment variables, used for the
+// writeback call (tslib-putRecords) once SharePoint provisioning succeeds.
+const authObj = {
   company: process.env.COMPANY,
   user: process.env.USER,
   password: process.env.PASSWORD,
   instance: process.env.INSTANCE,
-};*/
+};
 
-// Retrieve projects from SPP read (passed via lambda function call)
+const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
+const SHAREPOINT_HOSTNAME = "trivocahealth.sharepoint.com";
+const SITE_PATH_BY_DIVISION = {
+  Qual: "/sites/QualitativeProjects",
+  Quant: "/sites/QuantitativeProjects", // adjust if the actual Quant site path differs
+};
+
+// Mailbox used to send the "your folders are ready" notification.
+// Must be a real mailbox in the tenant — app-only Mail.Send sends AS this
+// user, not as the project owner. Recipient (project.owner_email) can be
+// any valid address.
+const NOTIFICATION_FROM_MAILBOX = "rschein@topstepllc.com";
+
+// Only projects closed-won ON OR AFTER this date are provisioned. SPP sends
+// project_closed_won_date__c as "YYYY-MM-DD", which sorts correctly as a
+// plain string, so no Date parsing (or timezone drift) is needed.
+const CLOSED_WON_CUTOFF = "2026-09-24";
+
+// True if the project's closed-won date is on/after CLOSED_WON_CUTOFF.
+// Blank, missing, or SPP's "0000-00-00" empty-date value all fail the check.
+function isEligibleByClosedWonDate(project) {
+  const closedWon = (project.project_closed_won_date__c || "").substring(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(closedWon) || closedWon === "0000-00-00") {
+    return false;
+  }
+  return closedWon >= CLOSED_WON_CUTOFF;
+}
+
+// Retrieve NEW projects from SPP (passed via lambda function call) and
+// provision SharePoint folders for each. Handles updates to EXISTING
+// projects in a separate Lambda.
+// (TEAM LOGIC DISABLED 9/21 — previously also provisioned a Team per project.)
 export const handler = async (event) => {
   const bodyJSON = JSON.parse(event.body);
   console.log(`bodyJSON: ${JSON.stringify(bodyJSON)}`);
 
   if (!Array.isArray(bodyJSON.projects) || bodyJSON.projects.length === 0) {
-    console.log("No projects in payload");
+    console.log("No new projects in payload");
     return;
   }
+
+  // Skip anything closed-won before CLOSED_WON_CUTOFF (or with no date)
+  const eligibleProjects = bodyJSON.projects.filter((project) => {
+    const eligible = isEligibleByClosedWonDate(project);
+    if (!eligible) {
+      console.log(
+        `Skipping "${project.name}" — project_closed_won_date__c "${project.project_closed_won_date__c}" is empty or before ${CLOSED_WON_CUTOFF}`,
+      );
+    }
+    return eligible;
+  });
+
+  if (eligibleProjects.length === 0) {
+    console.log(
+      `No projects with project_closed_won_date__c on/after ${CLOSED_WON_CUTOFF}`,
+    );
+    return;
+  }
+
   const token = await getGraphToken();
 
   await Promise.all(
-    bodyJSON.projects.map(async (project) => {
-      const ownerId = await getUserId(token, project.owner_email); // email of the proj owner
-      const teamId = await newSharepointTeam(token, project.name, ownerId);
+    eligibleProjects.map(async (project) => {
+      // TEAM LOGIC DISABLED (9/21) — Team creation for new projects
+      // let teamId = project.proj_sharepoint_team_id__c;
+      //
+      // if (teamId) {
+      //   console.log(
+      //     `Project "${project.name}" already has a Team (id=${teamId}) — skipping Team creation`,
+      //   );
+      // } else {
+      //   const ownerId = await getUserId(token, project.owner_email);
+      //   teamId = await newSharepointTeam(token, project.name, ownerId);
+      // }
 
-      await createFoldersInSharepoint(project, token);
+      const projectFolder = await createFoldersInSharepoint(project, token);
+
+      // TEAM LOGIC DISABLED (9/21) — original call also passed teamId:
+      // await writeSharepointIdsToSpp(project, projectFolder.id, teamId, authObj);
+      await writeSharepointIdsToSpp(project, projectFolder.id, authObj);
+
+      await emailProjectOwner(project, token);
     }),
   );
 };
 
+// Resolves the SharePoint site id for a division's configured site path
+async function getSiteId(token, sitePath) {
+  const res = await fetch(
+    `${GRAPH_BASE}/sites/${SHAREPOINT_HOSTNAME}:${sitePath}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+  const data = await res.json();
+  if (!res.ok)
+    throw new Error(`Failed to resolve site: ${JSON.stringify(data)}`);
+  return data.id;
+}
+
+// Resolves the default document library's drive id for a site
+async function getDriveId(token, siteId) {
+  const res = await fetch(`${GRAPH_BASE}/sites/${siteId}/drive`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = await res.json();
+  if (!res.ok)
+    throw new Error(`Failed to resolve drive: ${JSON.stringify(data)}`);
+  return data.id;
+}
+
+// Patches list-item fields (metadata) on a drive item, e.g. the project folder
+async function updateFolderMetadata(token, driveId, itemId, columns) {
+  const res = await fetch(
+    `${GRAPH_BASE}/drives/${driveId}/items/${itemId}/listItem/fields`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(columns),
+    },
+  );
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(
+      `Metadata update failed for item ${itemId}: ${JSON.stringify(data)}`,
+    );
+  }
+
+  console.log(
+    `Metadata updated for item ${itemId}: ${JSON.stringify(columns)}`,
+  );
+  return data;
+}
+
 // Create folders and subfolders in Sharepoint for each NEW project (Loop A, Yes branch, first action)
 async function createFoldersInSharepoint(project, token) {
-  const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
-  const hostname = "trivocahealth.sharepoint.com";
-  const SITE_PATH_BY_DIVISION = {
-    Qual: "/sites/QualProjects",
-    Quant: "/sites/QuantProjects", // adjust if the actual Quant site path differs
-  };
-
-  let sitePath;
-  if (project.proj_Division__c == "Qual") {
-    sitePath = SITE_PATH_BY_DIVISION.Qual;
-  } else if (project.proj_Division__c == "Quant") {
-    sitePath = SITE_PATH_BY_DIVISION.Quant;
-  }
+  const sitePath = SITE_PATH_BY_DIVISION[project.proj_Division__c];
   console.log(`sitePath: ${sitePath}`);
   if (!sitePath) {
     console.log(
@@ -56,27 +171,9 @@ async function createFoldersInSharepoint(project, token) {
     );
     return { deleted: false };
   }
-  async function getSiteId(token) {
-    const res = await fetch(`${GRAPH_BASE}/sites/${hostname}:${sitePath}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const data = await res.json();
-    if (!res.ok)
-      throw new Error(`Failed to resolve site: ${JSON.stringify(data)}`);
-    return data.id;
-  }
-  const siteId = await getSiteId(token);
+  const siteId = await getSiteId(token, sitePath);
   console.log(`siteId: ${siteId}`);
 
-  async function getDriveId(token, siteId) {
-    const res = await fetch(`${GRAPH_BASE}/sites/${siteId}/drive`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const data = await res.json();
-    if (!res.ok)
-      throw new Error(`Failed to resolve drive: ${JSON.stringify(data)}`);
-    return data.id;
-  }
   const driveId = await getDriveId(token, siteId);
   console.log(`driveId: ${driveId}`);
 
@@ -149,7 +246,11 @@ async function createFoldersInSharepoint(project, token) {
     },
   ];
 
-  const projectFolder = await createFolder(token, driveId, project.name);
+  const projectFolder = await createFolder(
+    token,
+    driveId,
+    sanitizeSharepointName(project.name),
+  );
 
   // Metadata on the project folder itself
   await addMetadataToSharepointFolder(
@@ -158,6 +259,7 @@ async function createFoldersInSharepoint(project, token) {
     projectFolder.id,
     siteId,
     driveId,
+    project.proj_Division__c,
   );
 
   console.log(`Creating folder structure for: ${project.name}`);
@@ -171,155 +273,145 @@ async function createFoldersInSharepoint(project, token) {
 }
 
 // Add metadata to the Sharepoint folder for each NEW project (Loop A, Yes branch, second action)
-// Confirm if this should be its own function or live in the createFoldersInSharepoint function
 async function addMetadataToSharepointFolder(
   token,
   project,
   folderId,
   siteId,
   driveId,
+  division,
 ) {
   console.log(`Entering metadata function`);
-  //"LinkFilename", //name?
-  // "Account Rep", // not found
-  const RELEVANT_COLUMNS = [
-    "Year",
-    "ProjectManager",
-    "ProjectCoordinator",
-    "Clients",
-    "Account_x0020_Manager",
-  ];
 
-  async function getLibraryColumns(
-    token,
-    siteId,
-    filterNames = RELEVANT_COLUMNS,
-  ) {
-    const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
-
-    const listRes = await fetch(
-      `${GRAPH_BASE}/sites/${siteId}/lists/Documents`,
-      {
-        headers: { Authorization: `Bearer ${token}` },
-      },
-    );
-    const listData = await listRes.json();
-    if (!listRes.ok) {
-      throw new Error(
-        `Failed to resolve Documents list: ${JSON.stringify(listData)}`,
-      );
-    }
-    const listId = listData.id;
-
-    const colRes = await fetch(
-      `${GRAPH_BASE}/sites/${siteId}/lists/${listId}/columns?$select=name,displayName,columnGroup,hidden,readOnly`,
-      { headers: { Authorization: `Bearer ${token}` } },
-    );
-    const colData = await colRes.json();
-    if (!colRes.ok) {
-      throw new Error(`Failed to get columns: ${JSON.stringify(colData)}`);
-    }
-
-    const relevant = colData.value.filter((col) =>
-      filterNames.includes(col.name),
-    );
-
-    relevant.forEach((col) => {
-      console.log(`internal: ${col.name}  |  display: ${col.displayName}`);
+  // Pulls the column definitions for the document library backing this drive
+  // and logs displayName -> name (the internal/backend name Graph expects
+  // in the fields PATCH below). Handy for re-discovering internal names
+  // (e.g. "Project_x0020_Status") without digging through Site Settings.
+  async function logFolderColumnNames(token, driveId) {
+    const res = await fetch(`${GRAPH_BASE}/drives/${driveId}/list/columns`, {
+      headers: { Authorization: `Bearer ${token}` },
     });
-
-    return relevant;
-  }
-  let columns = await getLibraryColumns(token, siteId);
-
-  async function getSharepointUserId(token, siteId, upnOrEmail) {
-    const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
-
-    // Looks up the user's row in this site's hidden "User Information List" —
-    // that row's numeric id is what personOrGroup fields (like ProjectManagerLookupId) need.
-    const res = await fetch(
-      `${GRAPH_BASE}/sites/${siteId}/lists/User%20Information%20List/items?$expand=fields($select=EMail)&$filter=fields/EMail eq '${upnOrEmail}'`,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Prefer: "HonorNonIndexedQueriesWarningMayFailRandomly",
-        },
-      },
-    );
-
     const data = await res.json();
     if (!res.ok) {
-      throw new Error(
-        `Failed to resolve SharePoint user "${upnOrEmail}": ${JSON.stringify(data)}`,
+      console.log(
+        `Failed to fetch column definitions: ${JSON.stringify(data)}`,
       );
+      return;
     }
-    if (!data.value || data.value.length === 0) {
-      throw new Error(
-        `User "${upnOrEmail}" not found in site User Information List — they may not have visited the site yet.`,
-      );
-    }
-
-    const spUserId = data.value[0].id;
-    console.log(`Resolved SharePoint user id for ${upnOrEmail}: ${spUserId}`);
-    return spUserId;
+    const columnMap = data.value
+      .filter((col) => !col.readOnly) // skip system/computed columns you can't write to
+      .map((col) => ({ displayName: col.displayName, name: col.name }));
+    console.log(`Writable column names: ${JSON.stringify(columnMap)}`);
   }
-  const spOwnerId = await getSharepointUserId(
-    token,
-    siteId,
-    project.owner_email,
-  );
-  const spCoordinatorId = await getSharepointUserId(
-    token,
-    siteId,
-    project.coordinator_email,
-  );
 
-  async function updateFolderMetadata(token, driveId, itemId, columns) {
-    const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
+  await logFolderColumnNames(token, driveId);
 
-    const res = await fetch(
-      `${GRAPH_BASE}/drives/${driveId}/items/${itemId}/listItem/fields`,
-      {
-        method: "PATCH",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(columns),
-      },
-    );
-
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(
-        `Metadata update failed for item ${itemId}: ${JSON.stringify(data)}`,
-      );
-    }
-
+  const columns = buildDivisionMetadataColumns(project, division);
+  if (!columns) {
     console.log(
-      `Metadata updated for item ${itemId}: ${JSON.stringify(columns)}`,
+      `Unrecognized division "${division}" — skipping metadata update for folder ${folderId}`,
     );
-    return data;
+    return;
   }
-  await updateFolderMetadata(token, driveId, folderId, {
-    Year: String(new Date().getFullYear()),
-    ProjectManagerLookupId: spOwnerId,
-    ProjectCoordinatorLookupId: spCoordinatorId,
-    Clients: "Dexcom",
-    /*FileLeafRef
-Account_x0020_Manager (confirm)
-Clients
-ProjectCoordinator*/
-  });
+
+  await updateFolderMetadata(token, driveId, folderId, columns);
 }
 
-// Email project owner once creation is complete (maybe SPP action?)
-async function emailProjectOwner(project) {}
+// Emails the project owner once their SharePoint folders have been created —
+// called after createFoldersInSharepoint has resolved for the project. Sends
+// AS NOTIFICATION_FROM_MAILBOX (app-only Mail.Send requires a real tenant
+// mailbox as sender); recipient can be any valid address, since
+// project.owner_email comes straight from SPP.
+// (TEAM LOGIC DISABLED 9/21 — email previously also announced the Team.)
+async function emailProjectOwner(project, token) {
+  const message = {
+    message: {
+      subject: `SharePoint site ready: ${project.name}`,
+      body: {
+        contentType: "Text",
+        // TEAM LOGIC DISABLED (9/21) — original body mentioned the Team:
+        // content: `Hi,\n\nThe SharePoint folder structure and Team for "${project.name}" have been created and are ready to use.\n\nThanks,\nAutomation`,
+        content: `Hi,\n\nThe SharePoint folder structure for "${project.name}" has been created and is ready to use.\n\nThanks,\nAutomation`,
+      },
+      toRecipients: [
+        { emailAddress: { address: project.owner_email } },
+        { emailAddress: { address: "rschein@topstepllc.com" } },
+      ],
+    },
+    saveToSentItems: true,
+  };
 
+  const res = await fetch(
+    `${GRAPH_BASE}/users/${encodeURIComponent(NOTIFICATION_FROM_MAILBOX)}/sendMail`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(message),
+    },
+  );
+
+  // sendMail returns 202 with an EMPTY body on success — only parse JSON
+  // on the error path, or res.json() will throw on the happy path.
+  if (res.status !== 202) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(
+      `Failed to send folder-ready email for "${project.name}" to ${project.owner_email}: ${JSON.stringify(data)}`,
+    );
+  }
+
+  console.log(
+    `Sent folder-ready email to ${project.owner_email} for "${project.name}"`,
+  );
+}
+
+// Writes the newly-created SharePoint folder ID back to the project's record
+// in SPP. Call this once createFoldersInSharepoint has resolved.
+// TEAM LOGIC DISABLED (9/21) — original signature also accepted teamId:
+// async function writeSharepointIdsToSpp(project, folderId, teamId, authObj) {
+async function writeSharepointIdsToSpp(project, folderId, authObj) {
+  console.log(`WRITE--authObj: ${JSON.stringify(authObj)}`);
+  // TEAM LOGIC DISABLED (9/21)
+  // console.log(`WRITE--teamId: ${JSON.stringify(teamId)}`);
+  console.log(`WRITE--folderId: ${JSON.stringify(folderId)}`);
+  console.log(`WRITE--projectId: ${JSON.stringify(project.id)}`);
+  const projectSharepointIds = {
+    id: project.id,
+    proj_sharepoint_folder_id__c: folderId,
+    // TEAM LOGIC DISABLED (9/21)
+    // proj_sharepoint_team_id__c: teamId,
+  };
+
+  const projectUpdateDetails = {
+    authObj: authObj,
+    recordType: "Project",
+    writeObj: projectSharepointIds,
+  };
+
+  const projectUpdate = await callSharedUtil(
+    "tslib-putRecords",
+    projectUpdateDetails,
+  );
+
+  // TEAM LOGIC DISABLED (9/21) — original log included the Team ID:
+  // console.log(
+  //   `Wrote SharePoint IDs back to SPP for "${project.name}": folder=${folderId}, team=${teamId}`,
+  // );
+  console.log(
+    `Wrote SharePoint folder ID back to SPP for "${project.name}": folder=${folderId}`,
+  );
+
+  return projectUpdate;
+}
+
+// =============================================================================
+// TEAM LOGIC DISABLED (9/21) — Team creation + polling. Uncomment to restore.
+// =============================================================================
+/*
 // Create a Sharepoint Team Site for each NEW project (Loop A, Yes branch, second path, first action)
 async function newSharepointTeam(token, teamName, ownerId, description = "") {
-  const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
-
   const res = await fetch(`${GRAPH_BASE}/teams`, {
     method: "POST",
     headers: {
@@ -359,16 +451,12 @@ async function pollTeamCreation(
   maxAttempts = 30,
   delayMs = 5000,
 ) {
-  const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
   let lastStatus = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const res = await fetch(`${GRAPH_BASE}${operationUrl}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
-    console.log(
-      `res ${JSON.stringify(res)} concat ${GRAPH_BASE}${operationUrl}`,
-    );
     const data = await res.json();
     lastStatus = data.status;
     console.log(
@@ -398,6 +486,7 @@ async function pollTeamCreation(
     `Team creation timed out after ${maxAttempts} attempts for operation: ${operationUrl}. Last known status: "${lastStatus}"`,
   );
 }
+*/
 
 async function getGraphToken() {
   const url = `https://login.microsoftonline.com/07df17c1-4112-495c-b15f-76a25f844f3d/oauth2/v2.0/token`;
@@ -424,23 +513,149 @@ async function getGraphToken() {
 
   return data.access_token;
 }
+
+// =============================================================================
+// TEAM LOGIC DISABLED (9/21) — owner lookup was only used to assign the Team
+// owner. Uncomment along with newSharepointTeam/pollTeamCreation to restore.
+// =============================================================================
+/*
+const FALLBACK_OWNER_EMAIL = "unassigned.pm@trivoca.com";
+
+// Resolves a user's AAD object id for the given email. Falls back to
+// FALLBACK_OWNER_EMAIL if the original lookup fails or doesn't return a
+// usable id. Only throws if the fallback lookup ALSO fails, since at that
+// point there's no owner left to assign.
 async function getUserId(token, upnOrEmail) {
-  const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
-
-  const res = await fetch(
-    `${GRAPH_BASE}/users/${encodeURIComponent(upnOrEmail)}?$select=id,displayName,userPrincipalName`,
-    {
-      headers: { Authorization: `Bearer ${token}` },
-    },
-  );
-
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(
-      `Failed to resolve user "${upnOrEmail}": ${JSON.stringify(data)}`,
+  async function lookupUser(email) {
+    const res = await fetch(
+      `${GRAPH_BASE}/users/${encodeURIComponent(email)}?$select=id,displayName,userPrincipalName`,
+      { headers: { Authorization: `Bearer ${token}` } },
     );
+    const data = await res.json();
+    if (!res.ok || !data.id) return null;
+    return data;
   }
 
-  console.log(`Resolved user: ${data.userPrincipalName} -> id: ${data.id}`);
-  return data.id;
+  const primary = await lookupUser(upnOrEmail);
+  if (primary) {
+    console.log(
+      `Resolved user: ${primary.userPrincipalName} -> id: ${primary.id}`,
+    );
+    return primary.id;
+  }
+
+  console.log(
+    `Could not resolve user "${upnOrEmail}", falling back to ${FALLBACK_OWNER_EMAIL}`,
+  );
+
+  const fallback = await lookupUser(FALLBACK_OWNER_EMAIL);
+  if (fallback) {
+    console.log(
+      `Resolved fallback user: ${fallback.userPrincipalName} -> id: ${fallback.id}`,
+    );
+    return fallback.id;
+  }
+
+  // Both lookups failed — nothing usable to return, and passing undefined
+  // downstream just produces a confusing Graph error later, so fail loudly here.
+  throw new Error(
+    `Failed to resolve both primary user "${upnOrEmail}" and fallback "${FALLBACK_OWNER_EMAIL}"`,
+  );
+}
+*/
+
+// Builds the division-specific metadata columns object for the folder PATCH.
+// Builds the division-specific metadata columns object for the folder PATCH.
+function buildDivisionMetadataColumns(project, division) {
+  const projectDate = project.start_date
+    ? project.start_date.substring(0, 10)
+    : null;
+  const projectEndDate = project.trv_proj_End_Date__c
+    ? project.trv_proj_End_Date__c.substring(0, 10)
+    : null;
+
+  if (division === "Qual") {
+    return {
+      ProjectManager: project.owner_name,
+      Secondary_x0020_Project_x0020_Manager: project.secondary_owner_name,
+      ProjectCoordinator: project.coordinator_name,
+      ProjectDate: projectDate,
+      ProjectEndDate: projectEndDate,
+      AccountManager: project.proj_Sales_Rep__c,
+      ProjectStatus: project.proj_Project_Status__c,
+      Client: project.client_name,
+    };
+  }
+  if (division === "Quant") {
+    return {
+      Project_x0020_Manager: project.owner_name,
+      // Verify this internal name against the "Writable column names" log line
+      Secondary_x0020_Project_x0020_Manager: project.secondary_owner_name,
+      Project_x0020_Coordinator: project.coordinator_name,
+      Project_x0020_Start_x0020_Date: projectDate,
+      Project_x0020_End_x0020_Date: projectEndDate,
+      Account_x0020_Manager: project.proj_Sales_Rep__c,
+      Project_x0020_Status: project.proj_Project_Status__c,
+      Clients: project.client_name,
+    };
+  }
+  return null;
+}
+// SharePoint Online rejects these in file/folder names: " * : < > ? / \ |
+// (# and % are allowed in SPO). Also strips control characters.
+const INVALID_SP_CHARS = /["*:<>?/\\|\x00-\x1F]/g;
+
+// Names SharePoint blocks outright, regardless of characters
+const RESERVED_SP_NAMES = new Set([
+  ".lock",
+  "con",
+  "prn",
+  "aux",
+  "nul",
+  "com0",
+  "com1",
+  "com2",
+  "com3",
+  "com4",
+  "com5",
+  "com6",
+  "com7",
+  "com8",
+  "com9",
+  "lpt0",
+  "lpt1",
+  "lpt2",
+  "lpt3",
+  "lpt4",
+  "lpt5",
+  "lpt6",
+  "lpt7",
+  "lpt8",
+  "lpt9",
+  "_vti_",
+  "desktop.ini",
+]);
+
+// Returns a SharePoint-safe folder name, or throws if nothing usable is left.
+function sanitizeSharepointName(rawName) {
+  let name = (rawName || "")
+    .replace(INVALID_SP_CHARS, "-")
+    .replace(/\s+/g, " ") // collapse runs of whitespace
+    .replace(/^~\$/, "") // leading ~$ is blocked
+    .trim()
+    .replace(/[.\s]+$/, ""); // no trailing periods or spaces
+
+  if (name.includes("_vti_")) name = name.replace(/_vti_/g, "-vti-");
+  if (RESERVED_SP_NAMES.has(name.toLowerCase())) name = `${name}-project`;
+
+  // Keep well under the 400-char full-path limit
+  if (name.length > 200) name = name.substring(0, 200).trim();
+
+  if (!name) {
+    throw new Error(`Project name "${rawName}" is empty after sanitizing`);
+  }
+  if (name !== rawName) {
+    console.log(`Sanitized folder name: "${rawName}" -> "${name}"`);
+  }
+  return name;
 }

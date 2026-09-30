@@ -1,0 +1,12 @@
+{
+  "name": "spp-data-sync",
+  "version": "1.0.0",
+  "main": "sppDataSync.js",
+  "dependencies": {
+    "@duckdb/node-api": "latest",
+    "@aws-sdk/client-dynamodb": "^3.1052.0",
+    "@aws-sdk/util-dynamodb": "^3.996.2",
+    "@aws-sdk/client-ssm": "^3.0.0",
+    "fast-xml-parser": "^4.0.0"
+  }
+}

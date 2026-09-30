@@ -1,0 +1,90 @@
+Use this tool to answer questions about SPP project, task, customer, user, and
+transaction data by querying report data with SQL.
+
+Steps, always in this order:
+
+1. Call with action="getSchemas" to see the available tables and their exact
+   column names/types - column names may include spaces or special
+   characters requiring double-quotes. Call this once at the start of a
+   conversation, before writing any query. Do NOT call it again later in the
+   same conversation unless told the schema hasn't been fetched yet, or a
+   query fails because it references a table/column that doesn't exist
+   (which may mean the schema changed) - in either case, call it once to
+   refresh, then proceed.
+2. Before filtering or displaying any column whose values are not obviously
+   plain text (e.g. short codes, abbreviations, single letters/numbers, or any
+   column you're unsure how to interpret), call action="getFieldValues" with
+   a "table" parameter set to that table's name. This returns a map of the
+   table's coded fields to their meanings, e.g. a billing rule "type" column
+   where "F" means "Fixed Fee" and "T" means "T&M". Use the returned mapping
+   to translate the user's natural-language value into the correct stored
+   code before building your WHERE clause - never guess at what a code means,
+   and never filter on the human-readable label if the stored value is a
+   code. If the response comes back with an empty fieldValues object, that
+   table currently has no coded-field mappings defined - filter using the
+   raw values as they appear in the data.
+3. Call with action="executeQuery" and a "sql" parameter containing a single
+   read-only SELECT statement, using only the table/column names confirmed by
+   getSchemas. Only SELECT statements are permitted.
+
+## Argument format
+
+Provide arguments as a single direct JSON object with action/sql/table as
+top-level keys - never as a JSON string, and never with extra text before
+or after the object.
+
+## Data notes
+
+- The "name" column in the users table is stored as "Last, First" (e.g.
+  "Conroy, Kevin"), not "First Last". When filtering or matching by a person's
+  name, account for this format - e.g. WHERE "name" = 'Conroy, Kevin', not
+  WHERE "name" = 'Kevin Conroy'. If a person's name is given in "First Last"
+  order, convert it to "Last, First" before using it in a WHERE clause, or use
+  a pattern match (e.g. LIKE) that accounts for both possible word orders.
+- The due date for an invoice is the invoice "date" field plus the number of
+  days in the "terms" field after the word "Net" (e.g. "Net 30" = 30 days
+  after the invoice date). Treat "Upon Receipt" the same as "Net 30".
+- if you are asked for "actual" hours, calculate them from the decimal_hours field in the timeEntries table
+
+## SQL Dialect note
+
+All queries run against DuckDB, not Postgres/MySQL/SQL Server. Notable differences:
+Date arithmetic: to add or subtract a number of days FROM AN EXISTING DATE
+COLUMN, use "date" + (n || ' days')::INTERVAL, not DATE_ADD('day', n, date)
+or DATEADD(). This pattern is ONLY for shifting a real date value by a
+day-count you already have - it is NOT a way to construct or reconstruct a
+date out of a column you believe holds an integer/epoch value. If getSchemas
+reports a column as type Date or Timestamp, it already IS a real date -
+select and compare it directly, with no arithmetic or casting at all. Do
+not combine this interval pattern with an epoch anchor like DATE
+'1970-01-01' to "convert" a column into a date; that is never correct
+against a column already typed as Date in this data.
+String functions: SUBSTR() not SUBSTRING() (different arg order); verify
+against DuckDB docs when unsure. Prefer native date/interval types over
+string manipulation.
+
+## Table relationships
+
+Some columns are foreign keys - when getSchemas shows a column with a
+"references" property, that column holds an ID pointing to another table, not
+a directly filterable/displayable value. If a question needs to filter or
+display by a NAME (a stage, customer, user, status, etc.) and the relevant
+column has a "references" property rather than being a plain name field, you
+must join to the referenced table and column to get the actual name - never
+filter an ID column directly against a text value.
+Example: projects.project_stage_id has references: {table: "projectStages",
+column: "id"}. To filter "not Internal stage," join projects to
+projectStages and filter on its name column, not project_stage_id directly.
+
+## Coded fields vs. foreign keys
+
+Not every non-obvious column is a foreign key. Some columns (like
+project_billing_rule.type) store their own short codes directly rather than
+referencing another table - these won't have a "references" property in
+getSchemas. For these, use getFieldValues as described in Step 2 above rather
+than joining.
+
+Example:
+Step 1: { "action": "getSchemas" }
+Step 2: { "action": "getFieldValues", "table": "projectBillingRules" }
+Step 3: { "action": "executeQuery", "sql": "SELECT COUNT(\*) FROM projectBillingRules WHERE \"type\" = 'T'" }

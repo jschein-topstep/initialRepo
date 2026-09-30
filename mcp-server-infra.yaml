@@ -33,12 +33,16 @@ Parameters:
 
   ClaudeRedirectUri:
     Type: String
+    Default: https://claude.ai/api/mcp/auth_callback
     Description: >
-      REQUIRED, no default on purpose -- this is the callback URL Claude.ai
-      shows you when you add this as a custom connector. Deploy once with a
-      placeholder (e.g. https://placeholder.invalid/callback) to get the
-      server up, then redeploy with the real value once you have it; nothing
-      will complete a login until this matches exactly.
+      Claude.ai's own OAuth callback endpoint -- the same fixed value for
+      every custom connector on every stack, not generated per connector and
+      not related to this stack's own MCP URL. Confirmed against TopStep's
+      already-working stack, which uses this exact value. Set once at first
+      deploy; there's no placeholder/redeploy dance needed (a previous
+      version of this comment claimed otherwise -- that was wrong, confirmed
+      when BGB's setup hit it directly). Override only if Claude.ai's own
+      callback endpoint ever changes.
 
   McpServerImageUri:
     Type: String
@@ -101,6 +105,49 @@ Parameters:
       app and silently connecting to TopStep's SPP tenant instead of
       theirs. Pass "spp-top step-prod" for TopStep's own stack.
 
+  SSMParamPrefix:
+    Type: String
+    Default: /spp/top-step
+    Description: >
+      REQUIRED for the write path (propose_spp_write/execute_spp_write) --
+      mirrors spp-data-sync-infra.yaml's SSMParamPrefix exactly, same
+      convention: {prefix}/{instance}Key, {prefix}/{instance}XMLURL must
+      already exist in SSM. Reads never needed this before -- they go
+      through the person's own OAuth token directly. Every non-TopStep
+      customer stack MUST override this.
+
+  SppInstance:
+    Type: String
+    Default: production
+    AllowedValues: ["sandbox", "production", "demo"]
+    Description: >
+      Which SPP XML endpoint/API key the write path uses -- must match one
+      of sppDataSync.js's KNOWN_INSTANCES and have a corresponding SSM
+      param pair under SSMParamPrefix. Independent of SppInstanceName
+      (that's the S3 company folder; this is the SPP tenant/environment).
+
+  SppSyncIntegrationKey:
+    Type: String
+    Default: ""
+    Description: >
+      integrationKey used for the fire-and-forget post-write resync
+      invocation of sppDataSync (company-level, e.g. "spp-top step-prod")
+      -- NOT the caller's own per-user key. Should match whatever
+      SyncIntegrationKey the corresponding spp-data-sync-infra.yaml stack
+      already uses for its scheduled sync. REQUIRED once any write tool is
+      actually used; safe to leave blank until then.
+
+  SppDataSyncFunctionName:
+    Type: String
+    Default: sppDataSync
+    Description: >
+      Exact deployed sppDataSync Lambda FunctionName to invoke for the
+      post-write resync (e.g. "sppDataSync-bgb"). Passed explicitly rather
+      than derived from ResourceSuffix -- the two stacks' suffixes for the
+      same customer are not guaranteed to match (confirmed: the demo
+      account's spp-mcp-server stack uses "-rbreaux-2fb4" while its sibling
+      spp-data-sync-infra stack uses "-rbreaux-2f4b").
+
 Resources:
   # -------------------------------------------------------
   # Cognito: the actual OAuth authorization server. Tokens are
@@ -160,7 +207,34 @@ Resources:
         ImageUri: !Ref McpServerImageUri
       Role: !Ref LambdaExecutionRoleArn
       Timeout: 60
-      MemorySize: 1024
+      MemorySize: 3008 # bumped from 1024 -- this is also this AWS account's
+                       # actual Lambda memory ceiling right now, confirmed
+                       # by testing: 10240 (Lambda's own general maximum) is
+                       # rejected here with "value failed to satisfy
+                       # constraint: Member must have value less than or
+                       # equal to 3008", an account-level quota, not
+                       # something this template controls.
+                       #
+                       # AWS Lambda allocates CPU proportional to memory,
+                       # and this Lambda's cold-start table materialization
+                       # (DuckDB CSV parsing) is CPU-bound, not I/O-bound --
+                       # confirmed by testing:
+                       # running materialization concurrently (either on one
+                       # connection, which just serializes internally, or on
+                       # separate connections to the same shared instance)
+                       # gave ZERO speedup and sometimes made it slower
+                       # (contention), so parallelizing isn't the fix; more
+                       # CPU per table is. Matters far more for a
+                       # larger-data customer than for TopStep itself: this
+                       # API Gateway integration has a HARD 30-second
+                       # timeout (AWS's own platform maximum for HTTP APIs,
+                       # not something raising this Lambda's own Timeout
+                       # above can work around) -- confirmed happening in
+                       # production for BGB, whose larger tables alone
+                       # (e.g. one table took 14.5s at 1024 MB) blew well
+                       # past that cap on the very first "initialize" call,
+                       # which is what a Claude.ai connector add actually
+                       # sees as "Couldn't connect to the server."
       # No Layers here -- AWS does not support Lambda Layers on
       # PackageType: Image functions at all. oauthUtils.mjs/sharedUtils.js
       # (normally attached via the "sharedUtils" layer) are instead COPY'd
@@ -178,6 +252,13 @@ Resources:
           MCP_SERVER_BASE_URL: !Sub "https://${SppMcpApi}.execute-api.${AWS::Region}.amazonaws.com"
           FILTER_CACHE_TABLE: !Ref SppFilterCacheTable
           SPP_BASE_OAUTH_CONFIG_KEY: !Ref SppBaseOAuthConfigKey
+          # AI-initiated writes (propose_spp_write/execute_spp_write) --
+          # see ai/mcpServer/sppWriteClient.js and the write-feature plan.
+          SSM_PARAM_PREFIX: !Ref SSMParamPrefix
+          SPP_INSTANCE: !Ref SppInstance
+          SPP_SYNC_INTEGRATION_KEY: !Ref SppSyncIntegrationKey
+          SPP_DATA_SYNC_FUNCTION_NAME: !Ref SppDataSyncFunctionName
+          WRITE_AUDIT_TABLE: !Ref SppWriteAuditTable
 
   SppMcpApiInvokePermission:
     Type: AWS::Lambda::Permission
@@ -287,6 +368,31 @@ Resources:
         - AttributeName: email
           KeyType: HASH
 
+  # Serves as BOTH the short-lived propose_spp_write -> execute_spp_write
+  # proposal store AND the permanent write-audit log -- one row per write
+  # attempt, status moves proposed -> executed/rejected_by_us/
+  # rejected_by_spp. TTL is only ever present while status = "proposed";
+  # ai/mcpServer/sppWriteStore.js explicitly REMOVEs it the instant a row
+  # reaches a terminal state, so DynamoDB's TTL sweep only ever deletes
+  # genuinely-abandoned proposals, never real audit history. See
+  # sppWriteStore.js for the full design reasoning.
+  SppWriteAuditTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "sppWriteAudit${ResourceSuffix}"
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: proposalId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: proposalId
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
   SppFilterCacheRefreshRule:
     Type: AWS::Events::Rule
     Properties:
@@ -306,6 +412,38 @@ Resources:
       Principal: events.amazonaws.com
       SourceArn: !GetAtt SppFilterCacheRefreshRule.Arn
 
+  # -------------------------------------------------------
+  # Keep-warm ping: full materialization alone can already exceed API
+  # Gateway's hard 30-second integration timeout on a larger customer's
+  # data (confirmed happening in production for BGB -- a real user query
+  # timed out this way, even though the query itself ran fast once the
+  # container was warm). Pinging every 5 minutes -- well inside Lambda's
+  # typical idle-container retention window -- keeps one container warm
+  # continuously during normal usage, so real requests mostly land on an
+  # already-materialized container instead of paying that cost themselves.
+  # Applies to every customer's stack via this shared template, not just
+  # BGB's -- no real downside for a smaller customer like TopStep, and it
+  # only gets more relevant as any customer's data grows over time.
+  # -------------------------------------------------------
+  SppMcpKeepWarmRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "spp-mcp-keep-warm${ResourceSuffix}"
+      ScheduleExpression: "rate(5 minutes)"
+      State: ENABLED
+      Targets:
+        - Id: SppMcpServerFunction
+          Arn: !GetAtt SppMcpServerFunction.Arn
+          Input: '{"action":"keepWarm"}'
+
+  SppMcpKeepWarmPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref SppMcpServerFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt SppMcpKeepWarmRule.Arn
+
 Outputs:
   McpServerBaseUrl:
     Value: !Sub "https://${SppMcpApi}.execute-api.${AWS::Region}.amazonaws.com"
@@ -319,3 +457,5 @@ Outputs:
     Value: !Ref SppMcpUserPoolClient
   FilterCacheTableName:
     Value: !Ref SppFilterCacheTable
+  WriteAuditTableName:
+    Value: !Ref SppWriteAuditTable

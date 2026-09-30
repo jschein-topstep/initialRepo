@@ -14,8 +14,9 @@ COPY ai/mcpServer/package.json ${LAMBDA_TASK_ROOT}
 RUN npm install
 
 # Reused as-is from aiQueryReports -- see the additive Object.assign(exports,
-# ...) at the bottom of that file, and tools.js's require("./index.js") here.
-COPY ai/aiQueryReports/index.js ${LAMBDA_TASK_ROOT}/index.js
+# ...) at the bottom of that file, and tools.js's require("./reportEngine.js")
+# here.
+COPY ai/aiQueryReports/reportEngine.js ${LAMBDA_TASK_ROOT}/reportEngine.js
 COPY ai/aiQueryReports/agent-instructions.txt ${LAMBDA_TASK_ROOT}/agent-instructions.txt
 COPY ai/aiQueryReports/tool-description.txt ${LAMBDA_TASK_ROOT}/tool-description.txt
 
@@ -33,5 +34,13 @@ COPY ai/mcpServer/sppUserAuth.js ${LAMBDA_TASK_ROOT}
 COPY ai/mcpServer/sppRestClient.js ${LAMBDA_TASK_ROOT}
 COPY ai/mcpServer/filterCache.js ${LAMBDA_TASK_ROOT}
 COPY ai/mcpServer/filterScope.js ${LAMBDA_TASK_ROOT}
+
+# AI-initiated SPP writes (propose_spp_write/execute_spp_write) -- see the
+# write-feature implementation plan for how these fit together.
+COPY ai/mcpServer/masterConfig.js ${LAMBDA_TASK_ROOT}
+COPY ai/mcpServer/sppWriteClient.js ${LAMBDA_TASK_ROOT}
+COPY ai/mcpServer/sppWritePermissions.js ${LAMBDA_TASK_ROOT}
+COPY ai/mcpServer/sppWriteStore.js ${LAMBDA_TASK_ROOT}
+COPY ai/mcpServer/writeTools.js ${LAMBDA_TASK_ROOT}
 
 CMD [ "mcp-handler.handler" ]

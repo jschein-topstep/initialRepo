@@ -3,15 +3,23 @@ const path = require("path");
 const { McpServer } = require("@modelcontextprotocol/sdk/server/mcp.js");
 
 const { LambdaTransport } = require("./lambda-transport.js");
-const { registerTools, setupConnection } = require("./tools.js");
+const {
+  registerTools,
+  setupConnection,
+  doCheckSppAccessStatus,
+  doSyncSppAccess,
+  textResult,
+  errorResult,
+  ToolInputError,
+} = require("./tools.js");
 const oauthEndpoints = require("./oauth-endpoints.js");
 const { applyFilterScope } = require("./filterScope.js");
 const filterCache = require("./filterCache.js");
 const sppRestClient = require("./sppRestClient.js");
 
-const timings = {}; // reused/overwritten per tool call, matches index.js's usage
+const timings = {}; // reused/overwritten per tool call, matches reportEngine.js's usage
 
-// Same system-prompt content the runAgent path in aiQueryReports/index.js
+// Same system-prompt content the runAgent path in aiQueryReports/reportEngine.js
 // uses, surfaced here as the MCP server's "instructions" field (the closest
 // MCP equivalent -- there's no way to force a system prompt on a claude.ai
 // conversation the way a direct Anthropic API call can).
@@ -83,6 +91,43 @@ async function handleMcpRequest(event) {
 
   const toolName = message.method === "tools/call" ? message.params?.name : undefined;
   console.log(`MCP method: ${message.method}${toolName ? ` (tool: ${toolName})` : ""}`);
+
+  // Fast path: sync_spp_access and check_spp_access_status never touch
+  // DuckDB/materialized SPP data at all -- only the OAuth token store, the
+  // filter cache, and (sync_spp_access only) a live SPP REST call -- so
+  // they're handled here, before setupConnection/applyFilterScope even
+  // run, rather than paying full-table cold-start materialization cost for
+  // no reason. tools/list still goes through the normal path below (so
+  // both tools stay fully discoverable), and registerTools still wraps the
+  // same underlying doCheckSppAccessStatus/doSyncSppAccess functions as a
+  // redundant-but-harmless fallback -- only an actual tools/call
+  // invocation of these two is intercepted here.
+  //
+  // Confirmed necessary in production, not just theoretical: on BGB (a
+  // much larger customer than TopStep), a cold container combining full
+  // materialization (~20-30s) with sync_spp_access's own SPP REST fetch
+  // consistently landed at 35-54s total -- comfortably past API Gateway's
+  // hard 30-second integration timeout, which is what actually surfaced as
+  // "Couldn't connect to the server" / a hung tool call from Claude's side.
+  if (toolName === "sync_spp_access" || toolName === "check_spp_access_status") {
+    const claims = event.requestContext?.authorizer?.jwt?.claims;
+    const email = claims?.email || claims?.username;
+    let result;
+    try {
+      result = textResult(
+        toolName === "sync_spp_access"
+          ? await doSyncSppAccess(email)
+          : await doCheckSppAccessStatus(email),
+      );
+    } catch (error) {
+      result = errorResult(
+        error instanceof ToolInputError
+          ? error.message
+          : error.message || "Unexpected error",
+      );
+    }
+    return json(200, { jsonrpc: "2.0", id: message.id, result });
+  }
 
   const region = process.env.AWS_REGION || "us-east-2";
   const connection = await setupConnection(region, timings);
@@ -159,9 +204,59 @@ async function handleRefreshFilterCache() {
   return { statusCode: 200, body: JSON.stringify({ refreshed: emails.length, failed: failures.length }) };
 }
 
+// Invoked on a schedule (EventBridge rule, see mcp-server-infra.yaml) with
+// {"action": "keepWarm"} -- not an HTTP request, so like
+// handleRefreshFilterCache above it bypasses API Gateway entirely and
+// isn't subject to that path's 30-second integration timeout. Just calls
+// setupConnection directly: a cold container materializes everything (the
+// expensive part -- 20-30s+ for a larger customer like BGB) and becomes
+// warm; an already-warm container just runs its cheap staleness check and
+// returns almost immediately.
+//
+// Exists specifically because full materialization alone can already
+// exceed API Gateway's 30-second cap before a real query even runs --
+// confirmed happening in production (a genuine user query timed out this
+// way on BGB, even though the query itself would have been fast). This
+// doesn't fix that risk on its own -- a request can still land on a
+// genuinely cold container regardless (after a deploy, or if traffic is
+// sparse enough that containers still recycle between pings) -- it just
+// makes hitting a cold container much less likely during normal usage
+// hours, by keeping one warm continuously.
+async function handleKeepWarm() {
+  const region = process.env.AWS_REGION || "us-east-2";
+  const t0 = Date.now();
+  await setupConnection(region, {});
+  return { statusCode: 200, body: JSON.stringify({ warmedInMs: Date.now() - t0 }) };
+}
+
+// Invoked directly (same bypass-API-Gateway mechanism as the two actions
+// above) with {"action": "forceRefresh"} -- manually forces the staleness
+// check that would otherwise only run once every STALENESS_CHECK_INTERVAL_MS
+// (5 minutes) on a warm container, so a report_config.json/CSV edit takes
+// effect immediately instead of waiting out that interval. Only reaches
+// WHICHEVER container this particular invoke happens to land on -- under
+// real concurrent traffic there could be more than one warm container, and
+// this doesn't force the others -- but for the low-traffic case this exists
+// for (an admin actively testing a config change) that's not a practical
+// issue in practice. A cold container just does its normal cold start,
+// since there's no staleness check to force yet.
+async function handleForceRefresh() {
+  const region = process.env.AWS_REGION || "us-east-2";
+  const timings = {};
+  const t0 = Date.now();
+  await setupConnection(region, timings, { forceStalenessCheck: true });
+  return { statusCode: 200, body: JSON.stringify({ tookMs: Date.now() - t0, ...timings }) };
+}
+
 exports.handler = async (event) => {
   if (event.action === "refreshFilterCache") {
     return await handleRefreshFilterCache();
+  }
+  if (event.action === "keepWarm") {
+    return await handleKeepWarm();
+  }
+  if (event.action === "forceRefresh") {
+    return await handleForceRefresh();
   }
 
   const method = event.requestContext?.http?.method;

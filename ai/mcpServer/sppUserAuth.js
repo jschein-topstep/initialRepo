@@ -27,8 +27,18 @@ const OAUTH_CONFIG_TABLE = process.env.OAUTH_CONFIG_TABLE || "oauth_config";
 // The already-registered SPP application this reuses -- see module comment.
 const BASE_SPP_CONFIG_KEY = process.env.SPP_BASE_OAUTH_CONFIG_KEY || "spp-top step-prod";
 
+// Keyed on BASE_SPP_CONFIG_KEY (per-deployment, via SPP_BASE_OAUTH_CONFIG_KEY),
+// not a fixed string -- this used to hardcode "spp-top-step-user-" regardless
+// of which deployment ran it, so every deployment (TopStep, BGB, any new
+// customer) computed the SAME row for the same email. Confirmed happening in
+// production: a TopStep staff email that had already connected to TopStep's
+// own SPP instance got silently handed TopStep's authorization link when
+// connecting through an unrelated demo account's connector instead, because
+// ensurePerUserOAuthConfig found that pre-existing row first (it's
+// deliberately idempotent) and reused it instead of creating a new one for
+// this deployment.
 function perUserIntegrationKey(email) {
-  return `spp-top-step-user-${email.toLowerCase().trim()}`;
+  return `${BASE_SPP_CONFIG_KEY}-user-${email.toLowerCase().trim()}`;
 }
 
 let cachedBaseConfig = null;
@@ -86,9 +96,17 @@ async function ensurePerUserOAuthConfig(email) {
           // Per-row, not a global env var on tslib-exchangeCodeForTokens --
           // that Lambda is shared with other, unrelated company-level SPP
           // integrations, and a global redirect would send THEIR completed
-          // logins to Claude.ai too. exchangeCodeForTokens.mjs checks this
-          // field before falling back to its global default.
-          success_redirect_uri: "https://claude.ai/",
+          // logins here too. exchangeCodeForTokens.mjs checks this field
+          // before falling back to its global default.
+          //
+          // A neutral static confirmation page, not claude.ai -- redirecting
+          // to a fresh claude.ai tab never actually made sense: the person
+          // completing this SPP login already has the real conversation open
+          // in whatever tab/app they started this from (Claude, and in the
+          // future potentially ChatGPT or any other MCP client), and a bare
+          // "https://claude.ai/" redirect just dumped them on a new,
+          // unrelated Claude session instead of back where they came from.
+          success_redirect_uri: "https://topstep-ai-offering.s3.us-east-2.amazonaws.com/static/spp-connected.html",
         }),
         ConditionExpression: "attribute_not_exists(pk)",
       }),

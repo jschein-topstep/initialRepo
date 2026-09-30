@@ -1,7 +1,16 @@
-// Enforces filter-set access at the query layer: replaces "projects" and
-// "users" with views scoped to the current caller's cached permitted IDs,
-// so the agent's arbitrary SQL (execute_spp_query) is automatically scoped
-// no matter how it's written -- the agent never sees a row it shouldn't.
+// Enforces filter-set access at the query layer: replaces every scoped
+// table -- "projects"/"users"/"customers" (live, per-user REST access),
+// the static reference tables like "projectStages" (hand-curated config),
+// and every OTHER table that transitively references one of those via a
+// foreign key (a time entry whose project's stage is hidden, a booking on
+// a project the caller can't see, ...) -- with views scoped to the current
+// caller, so the agent's arbitrary SQL (execute_spp_query) is automatically
+// scoped no matter how it's written -- the agent never sees a row it
+// shouldn't, directly OR by way of something it references. Downstream
+// only: hiding a project hides things that reference the project, never
+// the (upstream) customer it belongs to. See reportEngine.js's
+// getScopingPlan for how the downstream table set and build order are
+// computed from RELATIONSHIPS.
 //
 // Why the raw materialized tables get renamed to "*_raw" rather than
 // building the view directly as "CREATE OR REPLACE VIEW projects AS SELECT
@@ -13,17 +22,51 @@
 // FIRST caller's already-filtered view, not the raw table, silently
 // intersecting two different people's access instead of scoping each
 // person's request independently. Renaming the raw table once (idempotent,
-// self-healing after index.js re-materializes it) gives the view a stable,
+// self-healing after reportEngine.js re-materializes it) gives the view a stable,
 // unshadowed source to always select from.
 
 const { getCachedPermittedIds } = require("./filterCache.js");
+const {
+  resolveFilterSetPermittedValues,
+  getScopingPlan,
+} = require("./reportEngine.js");
 
-const SCOPED_RECORD_TYPES = ["projects", "users"];
+const SCOPED_RECORD_TYPES = ["projects", "users", "customers"];
 
-async function ensureRawTablesRenamed(connection) {
+// Small SPP reference tables the REST API doesn't expose with filter-set
+// enforcement (unlike SCOPED_RECORD_TYPES above), so they're scoped from a
+// hand-curated static config instead of a live per-user REST fetch -- see
+// reportEngine.js's resolveFilterSetPermittedValues/report_config.json's
+// filterSets section. Extend this once a table is both synced (present in
+// REPORT_VIEWS) AND curated in filterSets -- payroll type is known to be
+// coming but isn't curated yet.
+const STATIC_SCOPED_RECORD_TYPES = [
+  "bookingTypes",
+  "projectStages",
+  "categories",
+  "items",
+  "chargeStages",
+  "timeTypes",
+];
+
+// Every table that needs enforcement, in the order it must be built: the
+// roots above, PLUS every table reportEngine.js's getScopingPlan finds
+// transitively downstream of one of them (e.g. a time entry whose project's
+// stage is hidden, per RELATIONSHIPS) -- see getScopingPlan's own comment
+// for the full reasoning. Confirmed with the user this is downstream-only:
+// hiding a project must not hide its (upstream) customer, only things that
+// reference the project. Recomputed fresh per request (cheap -- confirmed
+// via direct timing against the real relationships graph, single-digit
+// milliseconds even for the deepest/largest tables) rather than cached, so
+// it never needs separate invalidation when report_config.json changes.
+function computeScopingPlan() {
+  return getScopingPlan([...SCOPED_RECORD_TYPES, ...STATIC_SCOPED_RECORD_TYPES]);
+}
+
+async function ensureRawTablesRenamed(connection, allScoped) {
   const reader = await connection.runAndReadAll(`
     SELECT table_name FROM information_schema.tables
-    WHERE table_name IN ('${SCOPED_RECORD_TYPES.join("', '")}') AND table_type = 'BASE TABLE'
+    WHERE table_name IN ('${allScoped.join("', '")}') AND table_type = 'BASE TABLE'
   `);
   const rows = await reader.getRowObjects();
   for (const row of rows) {
@@ -39,23 +82,87 @@ function idsListSql(ids) {
   return `SELECT UNNEST([${safeIds.join(", ")}]) AS id`;
 }
 
-// Rebuilds the "projects"/"users" views for the current request, scoped to
-// `email`'s cached permitted IDs. Not connected yet (or no cache entry) ->
-// both views resolve to zero rows -- fail closed, never fail open.
-//
-// Returns { hasSyncedAccess }: whether a cache entry exists at all. This
-// matters because an empty result set looks identical to the agent whether
-// the person isn't connected/synced yet or is connected with genuinely zero
-// permitted rows -- there is no way to tell those apart from query results
-// alone. Callers use this to make that distinction explicit rather than
-// leaving the agent to guess (which it will get wrong).
-async function applyFilterScope(connection, email) {
-  await ensureRawTablesRenamed(connection);
+// filter_sets.json permitted-id keys are hand-typed strings, not
+// necessarily positive integers (SPP reference-table ids are usually small
+// positive ints, but nothing guarantees that) -- quoted-string comparison
+// via CAST(id AS VARCHAR) handles that generally, same reasoning as
+// mergeIntoS3Csv's VARCHAR-everywhere approach elsewhere in this project.
+function sqlQuote(value) {
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
 
-  const cached = email ? await getCachedPermittedIds(email) : null;
+// Builds the WHERE clause for one static-scoped table from what
+// resolveFilterSetPermittedValues returned for it: "all" -> unrestricted,
+// a Set -> restricted to those ids, anything else (null -- no filter set,
+// unknown filter set, or table not yet curated) -> fail closed.
+function staticWhereClause(permitted) {
+  if (permitted === "all") {
+    return "TRUE";
+  }
+  if (permitted instanceof Set) {
+    if (permitted.size === 0) {
+      return "FALSE";
+    }
+    return `CAST(id AS VARCHAR) IN (${[...permitted].map(sqlQuote).join(", ")})`;
+  }
+  return "FALSE";
+}
 
-  for (const recordType of SCOPED_RECORD_TYPES) {
-    const idsSql = idsListSql(cached?.[recordType]);
+// Same lookup as getPrimaryFilterSetId below, for the caller's role_id
+// instead of their primary_filter_set -- used by sppWritePermissions.js to
+// gate write actions via reportEngine.resolveRolePermission. Same
+// fail-closed-to-null reasoning: an unresolved role is exactly the case
+// resolveRolePermission already treats as "deny".
+async function getUserRoleId(connection, email) {
+  try {
+    const reader = await connection.runAndReadAll(`
+      SELECT CAST(role_id AS VARCHAR) AS role_id
+      FROM users_raw
+      WHERE lower(CAST(email AS VARCHAR)) = lower(${sqlQuote(email)})
+      LIMIT 1
+    `);
+    const rows = await reader.getRowObjects();
+    return rows.length ? rows[0].role_id : null;
+  } catch (error) {
+    console.log(`Could not resolve role_id for ${email}: ${error.message}`);
+    return null;
+  }
+}
+
+// Looks up the caller's own primary_filter_set from the just-renamed
+// users_raw table (not the "users" view -- scoping it comes later in
+// applyFilterScope, and self-referencing it would hit the exact same
+// warm-container staleness problem the module comment at the top of this
+// file describes). Case-insensitive match on email, matching filterCache.js's
+// own normalization. Returns null -- not found, no users_raw yet (e.g.
+// nothing materialized this container), or any query error -- rather than
+// throwing; an unresolved filter set is exactly the fail-closed case
+// resolveFilterSetPermittedValues already handles, and a query error here
+// must not take down every OTHER tool in the request over one lookup.
+async function getPrimaryFilterSetId(connection, email) {
+  try {
+    const reader = await connection.runAndReadAll(`
+      SELECT CAST(primary_filter_set AS VARCHAR) AS pfs
+      FROM users_raw
+      WHERE lower(CAST(email AS VARCHAR)) = lower(${sqlQuote(email)})
+      LIMIT 1
+    `);
+    const rows = await reader.getRowObjects();
+    return rows.length ? rows[0].pfs : null;
+  } catch (error) {
+    console.log(`Could not resolve primary_filter_set for ${email}: ${error.message}`);
+    return null;
+  }
+}
+
+// A table's own restriction, independent of anything it references: the
+// REST-cache-based clause for projects/users/customers, the static-config
+// clause for the hand-curated reference tables, or "TRUE" (no restriction
+// of its own) for a table that's only here because something ELSE cascades
+// into it.
+function baseWhereClause(table, cached, filterSetId) {
+  if (SCOPED_RECORD_TYPES.includes(table)) {
+    const idsSql = idsListSql(cached?.[table]);
     const permittedClause = idsSql ? `id IN (${idsSql})` : "FALSE";
     // Generic/service SPP user accounts (templates like "NewHire1-June",
     // not real people) are unconditionally excluded from SPP's own
@@ -67,16 +174,117 @@ async function applyFilterScope(connection, email) {
     // private data), so "users" always shows them alongside whatever's
     // permitted, bypassing the fail-closed permitted-IDs check just for
     // this flag.
-    const whereClause =
-      recordType === "users"
-        ? `(${permittedClause} OR CAST(generic AS VARCHAR) = '1')`
-        : permittedClause;
-    await connection.run(
-      `CREATE OR REPLACE VIEW "${recordType}" AS SELECT * FROM "${recordType}_raw" WHERE ${whereClause}`,
-    );
+    return table === "users"
+      ? `(${permittedClause} OR CAST(generic AS VARCHAR) = '1')`
+      : permittedClause;
+  }
+  if (STATIC_SCOPED_RECORD_TYPES.includes(table)) {
+    return staticWhereClause(resolveFilterSetPermittedValues(filterSetId, table));
+  }
+  return "TRUE";
+}
+
+// Rebuilds every scoped view for the current request: the "projects"/
+// "users"/"customers" views (live, REST-cache-based), the static
+// reference-table views (booking type, project stage, category, item,
+// charge stage, time type -- hand-curated-config-based), AND every table
+// reportEngine.js's getScopingPlan finds transitively downstream of one of
+// those (e.g. a time entry whose project's stage is hidden) -- built in
+// dependency order so each table's cascade conditions can reference its
+// prerequisites' ALREADY-scoped views. Not connected yet (or no cache
+// entry) -> the REST-scoped views resolve to zero rows. No resolvable
+// filter set, or that table not yet curated -> the static-scoped views (and
+// anything cascading from them) resolve to zero rows. Fail closed
+// everywhere, never fail open.
+//
+// Returns { hasSyncedAccess }: whether a REST filter cache entry exists at
+// all for this email. This matters because an empty result set looks
+// identical to the agent whether the person isn't connected/synced yet or
+// is connected with genuinely zero permitted rows -- there is no way to
+// tell those apart from query results alone. Callers use this to make that
+// distinction explicit rather than leaving the agent to guess (which it
+// will get wrong). Reflects REST-cache status only, not static-table or
+// cascaded scoping -- someone can be fully connected while their
+// primary_filter_set still isn't curated, which correctly fails closed on
+// just the affected tables without affecting this flag.
+async function applyFilterScope(connection, email) {
+  const plan = computeScopingPlan();
+  await ensureRawTablesRenamed(connection, plan.map((step) => step.table));
+
+  const cached = email ? await getCachedPermittedIds(email) : null;
+  const filterSetId = email
+    ? await getPrimaryFilterSetId(connection, email)
+    : null;
+
+  for (const { table, cascadeConditions } of plan) {
+    // Isolated per table on purpose -- applyFilterScope runs unconditionally
+    // on every request with no surrounding try/catch in mcp-handler.js, so
+    // one missing/not-yet-materialized table (e.g. a newly-added table
+    // before it's synced) throwing here would otherwise break every tool
+    // call for every table, not just this one. Fail this table closed and
+    // move on -- it's built in dependency order, so a table that failed
+    // here simply won't exist for anything further downstream to reference,
+    // which itself then fails closed the same way (no silent pass-through).
+    try {
+      const base = baseWhereClause(table, cached, filterSetId);
+      // CAST both sides to VARCHAR -- an FK column and the "id" column it
+      // references aren't guaranteed to share the same DuckDB-inferred
+      // type. Confirmed happening for real: several *_id columns come back
+      // VARCHAR (DuckDB's auto-detection falls back to it the moment a
+      // column has even one non-numeric value, e.g. an empty-string
+      // sentinel among mostly-numeric ids -- the same class of thing
+      // documented at mergeIntoS3Csv/sample_size=-1 elsewhere in this
+      // project), while the referenced table's own "id" is a clean BIGINT,
+      // and DuckDB refuses to compare them without an explicit cast.
+      //
+      // "0" is treated as a second "not set" sentinel alongside real NULL --
+      // confirmed happening in production (2026-09-27): SPP represents an
+      // unset FK on some records as a literal 0 rather than NULL (e.g. a
+      // charge that hasn't been invoiced yet has invoice_id=0, not NULL --
+      // confirmed against real data, 265 of 6515 charges on one account).
+      // Without this, those charges vanished entirely: the cascade condition
+      // required invoice_id to either be NULL or match a real invoice's id,
+      // and no invoice has id 0, so "not yet invoiced" was indistinguishable
+      // from "invoiced by a since-deleted/invisible invoice" and failed
+      // closed. Every table's real ids observed so far start at 1, never 0,
+      // so this is a safe platform-wide convention to special-case, not
+      // something that risks hiding a legitimately-zero-id row.
+      const cascadeClauses = cascadeConditions.map(
+        ({ column, referencesTable }) =>
+          `(CAST("${column}" AS VARCHAR) IS NULL OR CAST("${column}" AS VARCHAR) = '0' OR CAST("${column}" AS VARCHAR) IN (SELECT CAST(id AS VARCHAR) FROM "${referencesTable}"))`,
+      );
+      const whereClause = [base, ...cascadeClauses].join(" AND ");
+      await connection.run(
+        `CREATE OR REPLACE VIEW "${table}" AS SELECT * FROM "${table}_raw" WHERE ${whereClause}`,
+      );
+    } catch (error) {
+      console.log(`Could not scope "${table}" -- failing it closed (empty), so anything that references it downstream fails closed too instead of hitting a "table does not exist" error: ${error.message}`);
+      // Best-effort fallback: an empty view under the expected name, so a
+      // broken table degrades to "shows nothing" for itself AND for
+      // whatever's built after it in the plan, rather than the primary
+      // failure above cascading into a SECOND, more confusing failure
+      // class downstream (confirmed happening: one bad relationship broke
+      // materialization for it, which then broke every table built after
+      // it in the plan with "Table with name X does not exist", instead of
+      // each one failing closed independently and visibly).
+      try {
+        await connection.run(`CREATE OR REPLACE VIEW "${table}" AS SELECT * FROM "${table}_raw" WHERE FALSE`);
+      } catch (fallbackError) {
+        console.log(`Could not even build a fail-closed empty view for "${table}": ${fallbackError.message}`);
+      }
+    }
   }
 
   return { hasSyncedAccess: cached !== null };
 }
 
-module.exports = { applyFilterScope, SCOPED_RECORD_TYPES };
+module.exports = {
+  applyFilterScope,
+  SCOPED_RECORD_TYPES,
+  STATIC_SCOPED_RECORD_TYPES,
+  // Consumed by ai/mcpServer/sppWritePermissions.js for role-based write
+  // gating -- exported directly (unlike getPrimaryFilterSetId, which is
+  // only ever needed internally by applyFilterScope itself) since the write
+  // path needs it independently, outside the normal scoping pass.
+  getUserRoleId,
+};

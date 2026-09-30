@@ -34,6 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     if: needs.detect-changes.outputs.functions != '[]'
     strategy:
+      fail-fast: false
       matrix:
         function: ${{ fromJson(needs.detect-changes.outputs.functions) }}
     steps:
@@ -49,9 +50,23 @@ jobs:
       - name: Deploy ${{ matrix.function }}
         run: |
           FUNCTION_NAME=$(basename ${{ matrix.function }})
+
+          # Skip image-based functions (deployed via deploy.ps1 / ECR)
+          PKG=$(aws lambda get-function-configuration \
+                  --function-name "$FUNCTION_NAME" \
+                  --query PackageType --output text 2>/dev/null || echo "NotFound")
+          if [ "$PKG" = "Image" ]; then
+            echo "Skipping $FUNCTION_NAME: image-based function, deployed outside Actions"
+            exit 0
+          fi
+          if [ "$PKG" = "NotFound" ]; then
+            echo "Skipping $FUNCTION_NAME: no Lambda function by that name"
+            exit 0
+          fi
+
           cd ${{ matrix.function }}
-          zip -r ../../function.zip .
+          zip -r ../../function.zip . -x "*.zip" "*.bak" "*.ps1" "Dockerfile" "buildspec.yml"
           aws lambda update-function-code \
-            --function-name $FUNCTION_NAME \
+            --function-name "$FUNCTION_NAME" \
             --zip-file fileb://../../function.zip
           rm ../../function.zip

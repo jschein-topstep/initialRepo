@@ -14,6 +14,55 @@ const authObj = {
   instance: process.env.INSTANCE,
 };
 
+// ---------------------------------------------------------------------------
+// XML escaping
+// ---------------------------------------------------------------------------
+// The shared utils interpolate criteria/write values straight into the XML
+// request, so a value like "G&A" produces invalid XML and SPP rejects the
+// request. Every SPP call in this file goes through callSpp(), which escapes
+// all string values inside criteriaObj and writeObj (including nested lookup
+// objects like { value, lookupBy, inTable }) before handing off.
+//
+// NOTE: if xmlEscape is later added inside sharedUtils itself, remove the
+// escaping here or values will be double-escaped (G&amp;amp;A).
+
+const XML_ESCAPED_REQUEST_KEYS = ["criteriaObj", "writeObj"];
+
+function xmlEscape(value) {
+  return String(value)
+    .replace(/&/g, "&amp;") // must be first
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function escapeDeep(value) {
+  if (typeof value === "string") return xmlEscape(value);
+  if (Array.isArray(value)) return value.map(escapeDeep);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([k, v]) => [k, escapeDeep(v)]),
+    );
+  }
+  return value; // numbers, booleans, null, undefined pass through
+}
+
+// Wrapper for SPP-bound shared utils (getRecords / putRecords / deleteRecords).
+// Returns a new request object; the caller's objects are never mutated, so
+// local comparisons (e.g. the dataStore cache) keep using unescaped values.
+async function callSpp(utilName, request) {
+  const safeRequest = { ...request };
+  for (const key of XML_ESCAPED_REQUEST_KEYS) {
+    if (safeRequest[key] !== undefined) {
+      safeRequest[key] = escapeDeep(safeRequest[key]);
+    }
+  }
+  return callSharedUtil(utilName, safeRequest);
+}
+
+// ---------------------------------------------------------------------------
+
 async function deleteExistingTasks(projId) {
   const sppTaskRequest = {
     authObj: authObj,
@@ -25,7 +74,7 @@ async function deleteExistingTasks(projId) {
     fields: "id",
   };
 
-  const taskRecords = await callSharedUtil("tslib-getRecords", sppTaskRequest);
+  const taskRecords = await callSpp("tslib-getRecords", sppTaskRequest);
 
   const sppDeleteRequest = {
     authObj: authObj,
@@ -33,10 +82,7 @@ async function deleteExistingTasks(projId) {
     recordsToDelete: taskRecords,
   };
 
-  const deletedRecords = await callSharedUtil(
-    "tslib-deleteRecords",
-    sppDeleteRequest,
-  );
+  const deletedRecords = await callSpp("tslib-deleteRecords", sppDeleteRequest);
 
   // finish this
   return;
@@ -51,7 +97,7 @@ async function getAttachment(fileId) {
     },
     limit: 1,
   };
-  const attachmentRecords = await callSharedUtil(
+  const attachmentRecords = await callSpp(
     "tslib-getRecords",
     sppAttachmentRequest,
   );
@@ -98,7 +144,7 @@ async function newBidGridLoad(
     );
 
     if (matchingSubPhaseObject === undefined) {
-      // the sub-phase has not been encountered yet1
+      // the sub-phase has not been encountered yet
       const subPhaseExtId = `proj${projectRecord.id}_phase${fileLines[i]["Phase"]}_subphase${fileLines[i]["Sub-phase"]}`;
 
       const newSubPhaseObj = {
@@ -124,6 +170,12 @@ async function newBidGridLoad(
 
     if (matchingTaskObject === undefined) {
       // the task has not been encountered yet
+      let parentid;
+      if (fileLines[i]["Sub-phase"]) {
+        parentid = matchingSubPhaseObject.externalid;
+      } else if (fileLines[i]["Phase"]) {
+        parentid = matchingPhaseObject.externalid;
+      }
       const taskExtId = `proj${projectRecord.id}_task${fileLines[i]["Unit Number"]}`;
       const newTaskObj = {
         projectid: projectRecord.id,
@@ -135,13 +187,13 @@ async function newBidGridLoad(
           inTable: "Costcenter",
         },
         parentid: {
-          value: matchingSubPhaseObject.externalid,
+          value: parentid,
           lookupBy: "externalid",
           inTable: "Projecttask",
         },
         unit_budget_cat__c: fileLines[i]["Budget Category"],
         default_category: {
-          value: fileLines[i]["Item Internal ID"],
+          value: fileLines[i]["Item(Product) Internal ID"],
           lookupBy: "netsuite_category_id__c",
           inTable: "Category",
         },
@@ -189,99 +241,6 @@ async function newBidGridLoad(
   }
 }
 
-/*async function calculateUnitPricePer(projId) {
-  const sppTaskRequest = {
-    authObj: authObj,
-    recordType: "Projecttask",
-    criteriaObj: {
-      projectid: projId,
-    },
-    limit: 1000,
-  };
-  const taskRecords = await callSharedUtil("tslib-getRecords", sppTaskRequest);
-
-  for (const taskRecord of taskRecords) {
-    if (taskRecord.is_a_phase != 1) {
-      const sppAssignmentRequest = {
-        authObj: authObj,
-        recordType: "Projecttaskassign",
-        criteriaObj: {
-          projecttaskid: taskRecord.id,
-        },
-        limit: 1000,
-      };
-      const assignmentRecords = await callSharedUtil(
-        "tslib-getRecords",
-        sppAssignmentRequest,
-      );
-
-      let assignmentBidTotal = 0;
-      let assignmentCostTotal = 0;
-
-      if (assignmentRecords?.length > 0) {
-        for (const assignmentRecord of assignmentRecords) {
-          assignmentBidTotal += parseFloat(assignmentRecord.assign_bid__c);
-          assignmentCostTotal += parseFloat(assignmentRecord.assign_cost__c);
-        }
-      } else {
-        assignmentBidTotal = taskRecord.unit_total_bid__c;
-        assignmentCostTotal = taskRecord.unit_total_cost__c;
-      }
-
-      const unitPrice =
-        taskRecord.number_units__c !== 0
-          ? assignmentBidTotal / taskRecord.number_units__c
-          : 0;
-      const taskUpdateDetails = {
-        authObj: authObj,
-        recordType: "Projecttask",
-        writeObj: {
-          id: taskRecord.id,
-          unit_total_bid__c: assignmentBidTotal,
-          unit_price_per__c: unitPrice,
-          unit_total_cost__c: assignmentCostTotal,
-        },
-      };
-
-      const taskUpdate = await callSharedUtil(
-        "tslib-putRecords",
-        taskUpdateDetails,
-      );
-
-      const billingRuleDetails = {
-        authObj: authObj,
-        recordType: "Projectbillingrule",
-        writeObj: {
-          active: 1,
-          type: "T",
-          categoryid: taskRecord.default_category,
-          name: `Billing rule for ${taskRecord.name}`,
-          project_task_filter: taskRecord.id,
-          projectid: projId,
-          rate_from: "U",
-        },
-      };
-
-      const billingRuleUpdate = await callSharedUtil(
-        "tslib-putRecords",
-        billingRuleDetails,
-      );
-
-      const uprateDetails = {
-        authObj: authObj,
-        recordType: "Uprate",
-        writeObj: {
-          categoryid: taskRecord.default_category,
-          userid: 251,
-          rate: unitPrice,
-          project_billing_ruleid: billingRuleUpdate.id,
-        },
-      };
-
-      const uprateAdd = await callSharedUtil("tslib-putRecords", uprateDetails);
-    }
-  }
-}*/
 // calculateUnitPricePer has been migrated to the standalone
 // TEMPUS-calculate-unit-price Lambda function.
 async function calculateUnitPricePer(projId) {
@@ -295,7 +254,7 @@ async function calculateUnitPricePer(projId) {
     Payload: JSON.stringify({ body: JSON.stringify({ projId: projId }) }),
   });
 
-  const response = await lambdaClient.send(command); // lowercase — the instance, not the class
+  const response = await lambdaClient.send(command);
 
   const responsePayload = JSON.parse(
     Buffer.from(response.Payload).toString("utf-8"),
@@ -315,6 +274,8 @@ async function calculateUnitPricePer(projId) {
 }
 
 async function getSPPRecordFromStore(dataStore, searchObject) {
+  // Cache comparison uses the raw (unescaped) values; callSpp escapes only the
+  // outgoing request copy.
   const searchObjectEntries = Object.entries(searchObject);
   let dataStoreRecord = dataStore.find((storedInfo) =>
     searchObjectEntries.every(([k, v]) => storedInfo[k] === v),
@@ -330,9 +291,9 @@ async function getSPPRecordFromStore(dataStore, searchObject) {
       limit: 1,
     };
 
-    const sppResponse = await callSharedUtil("tslib-getRecords", sppRequest);
+    const sppResponse = await callSpp("tslib-getRecords", sppRequest);
 
-    if (sppResponse.length === 1) {
+    if (sppResponse?.length === 1) {
       dataStoreRecord = {
         recordType: searchObjectType,
         ...sppResponse[0],
@@ -354,8 +315,6 @@ async function updateBidGridValues(
 ) {
   const dataStore = [];
 
-  //let originalCsv =
-  //"Project ID,Budget Category,Revenue Account,Team,Functional Area,Tab,Header,Unit Number,Unit Name,Unit Basis,# of Units,Bid Role,total hours,Total Cost,Total Bid\r\n";
   let originalCsv =
     "SPP_Project,Budget Category,Item Internal ID,Item Name,Phase,Sub-phase,Unit Number,Unit Name,Unit Basis,# of Units,Team,Functional Area,Bid Role,Total Hours,Total Cost,Total Bid\r\n";
   // csv field updates -- 7/29
@@ -367,7 +326,7 @@ async function updateBidGridValues(
     },
     limit: 1000,
   };
-  const taskRecords = await callSharedUtil("tslib-getRecords", sppTaskRequest);
+  const taskRecords = await callSpp("tslib-getRecords", sppTaskRequest);
 
   for (const task of taskRecords) {
     const categoryRecord = await getSPPRecordFromStore(dataStore, {
@@ -391,7 +350,7 @@ async function updateBidGridValues(
       },
       limit: 1000,
     };
-    const assignmentRecords = await callSharedUtil(
+    const assignmentRecords = await callSpp(
       "tslib-getRecords",
       sppAssignmentRequest,
     );
@@ -407,24 +366,8 @@ async function updateBidGridValues(
           id: assignment.userid,
         });
 
-        const field = [];
-        /*field[0] = projectRecord.name; // Project ID
-        field[1] = task.unit_budget_cat__c; // Budget Category
-        field[2] = categoryRecord?.name || ""; // Revenue Account
-        field[3] = costCenterRecord?.name || ""; // Team
-        field[4] = departmentRecord?.name || ""; // Functional Area
-        field[5] = 1; // Tab
-        field[6] = phaseRecord?.name || ""; // Header
-        field[7] = task.id_number; // Unit Number
-        field[8] = task.name; // Unit Name
-        field[9] = task.unit_basis__c; // Unit Basis
-        field[10] = task.number_units__c; // # of Units
-        field[11] = userRecord.name; // Bid Role
-        field[12] = assignment.planned_hours; // total hours
-        field[13] = assignment.assign_cost__c; // Total Cost
-        field[14] = assignment.assign_bid__c; // Total Bid*/
-
         // NEW MAPPING -- 7/29
+        const field = [];
         field[0] = projectRecord.name; // SPP_Project
         field[1] = task.unit_budget_cat__c; // Budget Category
         //field[2] = categoryRecord?.name || ""; // Item Internal ID
@@ -437,7 +380,7 @@ async function updateBidGridValues(
         field[9] = task.number_units__c; // # of Units
         field[10] = costCenterRecord?.name || ""; // Team
         field[11] = departmentRecord?.name || ""; // Functional Area
-        field[12] = userRecord.name; // Bid Role
+        field[12] = userRecord?.name || ""; // Bid Role
         field[13] = assignment.planned_hours; // total hours
         field[14] = assignment.assign_cost__c; // Total Cost
         field[15] = assignment.assign_bid__c; // Total Bid
@@ -446,25 +389,8 @@ async function updateBidGridValues(
       }
     } else {
       // no task assignments
-      const field = [];
-      /*field[0] = projectRecord.name; // SPP_Project
-      field[1] = task.unit_budget_cat__c; // Budget Category
-      //field[2] = categoryRecord?.name || ""; // Item Internal ID
-      field[3] = categoryRecord?.name || ""; // Item Name
-      field[4] = costCenterRecord?.name || ""; // Team
-      field[5] = ""; // Functional Area -- blank because no assignment
-      field[6] = 1; // Tab
-      field[7] = phaseRecord?.name || ""; // Header
-      field[8] = task.id_number; // Unit Number
-      field[9] = task.name; // Unit Name
-      field[10] = task.unit_basis__c; // Unit Basis
-      field[11] = task.number_units__c; // # of Units
-      field[12] = ""; // Bid Role -- blank because no assignment
-      field[13] = ""; // total hours -- blank because no assignment
-      field[13] = task.unit_total_cost__c; // Total Cost from Task
-      field[14] = task.unit_total_bid__c; // Total Bid from Task*/
-
       // NEW MAPPING -- 7/29
+      const field = [];
       field[0] = projectRecord.name; // SPP_Project
       field[1] = task.unit_budget_cat__c; // Budget Category
       //field[2] = categoryRecord?.name || ""; // Item Internal ID
@@ -480,7 +406,7 @@ async function updateBidGridValues(
       field[12] = ""; // Bid Role -- blank because no assignment
       field[13] = ""; // total hours -- blank because no assignment
       field[14] = task.unit_total_cost__c; // Total Cost from Task
-      field[15] = task.unit_total_bid__c; // Total Bid from Task*/
+      field[15] = task.unit_total_bid__c; // Total Bid from Task
 
       originalCsv += field.map(csvField).join(",") + "\r\n";
     }
@@ -512,13 +438,13 @@ async function updateBidGridValues(
     },
   ];
 
+  // csvDiff runs locally on CSV text (no XML), so it is NOT escaped.
   const diffResults = await callSharedUtil("tslib-csvDiff", {
     originalCsv,
     newCsv,
     fieldDefinitions,
   });
 
-  //return diffResults;
   const phaseInfo = diffResults[0]["Projecttask (Phase)"];
   const taskInfo = diffResults[1]["Projecttask"];
   const assignmentInfo = diffResults[2]["Projecttaskassign"];
@@ -549,19 +475,6 @@ async function processPhaseUpdates(projectRecord, phaseInfo, phaseObjArray) {
   }
 
   // phaseModified can not be determined -- it'll show up as an add or a delete
-
-  /*
-  for (const phaseDeleted of phaseInfo.deleted) {
-    const phaseExtId = `proj${projectRecord.id}_phase${phaseDeleted.row["Phase"]}`;
-    const phaseObjToBeDeleted = {
-      projectid: projectRecord.id,
-      name: phaseAdded.row["Phase"],
-      is_a_phase: 1,
-      externalid: phaseExtId,
-    };
-    phaseObjArray.push(newPhaseObj);
-  }
-    */
 }
 
 async function processTaskUpdates(projectRecord, taskInfo, taskObjArray) {
@@ -595,7 +508,7 @@ async function processTaskUpdates(projectRecord, taskInfo, taskObjArray) {
       },
       unit_budget_cat__c: task.row["Budget Category"],
       default_category: {
-        value: task.row["Item Internal ID"],
+        value: task.row["Item(Product) Internal ID"],
         lookupBy: "netsuite_category_id__c",
         inTable: "Category",
       },
@@ -637,10 +550,7 @@ async function processAssignmentUpdates(
       },
       limit: 1,
     };
-    const taskRecords = await callSharedUtil(
-      "tslib-getRecords",
-      sppTaskRequest,
-    );
+    const taskRecords = await callSpp("tslib-getRecords", sppTaskRequest);
 
     if (taskRecords && taskRecords.length > 0) {
       const taskId = taskRecords[0].id;
@@ -657,7 +567,7 @@ async function processAssignmentUpdates(
         },
         limit: 1,
       };
-      const assignmentRecords = await callSharedUtil(
+      const assignmentRecords = await callSpp(
         "tslib-getRecords",
         sppAssignmentRequest,
       );
@@ -669,12 +579,10 @@ async function processAssignmentUpdates(
           recordsToDelete: [assignmentRecords[0].id],
         };
 
-        const deleteResponse = await callSharedUtil(
+        const deleteResponse = await callSpp(
           "tslib-deleteRecords",
           deleteRequest,
         );
-
-        console.log("here");
       }
     }
   }
@@ -710,10 +618,7 @@ async function processAssignmentUpdates(
         },
         limit: 1,
       };
-      const taskRecords = await callSharedUtil(
-        "tslib-getRecords",
-        sppTaskRequest,
-      );
+      const taskRecords = await callSpp("tslib-getRecords", sppTaskRequest);
 
       if (taskRecords && taskRecords.length > 0) {
         const taskId = taskRecords[0].id;
@@ -730,7 +635,7 @@ async function processAssignmentUpdates(
           },
           limit: 1,
         };
-        const assignmentRecords = await callSharedUtil(
+        const assignmentRecords = await callSpp(
           "tslib-getRecords",
           sppAssignmentRequest,
         );
@@ -776,14 +681,13 @@ export const handler = async (event) => {
   const base64 = atob(bodyJSON.base64);
   const fileId = bodyJSON.fileId;
   //const attachmentRecord = await getAttachment(fileId);
-
   //const base64 = atob(attachmentRecord.base64_data);
+
   const fileLines = parse(base64, {
     columns: true,
     skip_empty_lines: true,
   });
 
-  const phaseNames = [];
   console.log(`headers: ${JSON.stringify(fileLines[0])}`);
 
   const projectName = fileLines[0]["SPP_Project"];
@@ -795,11 +699,11 @@ export const handler = async (event) => {
     },
     limit: 1,
   };
-  const projectRecords = await callSharedUtil(
-    "tslib-getRecords",
-    sppProjectRequest,
-  );
+  const projectRecords = await callSpp("tslib-getRecords", sppProjectRequest);
   const projectRecord = projectRecords?.[0];
+  if (!projectRecord) {
+    throw new Error(`SPP project not found: "${projectName}"`);
+  }
   console.log(`Project ID: ${projectRecord.id}`);
 
   const phaseObjArray = [];
@@ -830,16 +734,17 @@ export const handler = async (event) => {
     proj_project_gm_percent__c: 0,
     proj_total_hours__c: 0,
   };
-  // check for initial load complete box checked -- projectRecord.fieldName. If checked then update, otherwise proceed normally
 
   if (projectRecord.previousBidGridAttachmentId__c) {
+    // FIX: subPhaseObjArray was previously passed here, which shifted the
+    // arguments so assignments were pushed into taskObjArray (and written as
+    // Projecttask records) while the real assignmentObjArray stayed empty.
     await updateBidGridValues(
       fileLines,
       base64,
       projectRecord,
       projectCalculations,
       phaseObjArray,
-      subPhaseObjArray,
       taskObjArray,
       assignmentObjArray,
     );
@@ -857,58 +762,38 @@ export const handler = async (event) => {
 
   // create phases
   if (phaseObjArray.length > 0) {
-    const phaseWriteRequest = {
+    const phaseWriteResponse = await callSpp("tslib-putRecords", {
       authObj: authObj,
       recordType: "Projecttask",
       writeObj: phaseObjArray,
-    };
-
-    const phaseWriteResponse = await callSharedUtil(
-      "tslib-putRecords",
-      phaseWriteRequest,
-    );
+    });
   }
 
   // create subphases
   if (subPhaseObjArray.length > 0) {
-    const subPhaseWriteRequest = {
+    const subPhaseWriteResponse = await callSpp("tslib-putRecords", {
       authObj: authObj,
       recordType: "Projecttask",
       writeObj: subPhaseObjArray,
-    };
-
-    const subPhaseWriteResponse = await callSharedUtil(
-      "tslib-putRecords",
-      subPhaseWriteRequest,
-    );
+    });
   }
 
   // create tasks
   if (taskObjArray.length > 0) {
-    const taskWriteRequest = {
+    const taskWriteResponse = await callSpp("tslib-putRecords", {
       authObj: authObj,
       recordType: "Projecttask",
       writeObj: taskObjArray,
-    };
-
-    const taskWriteResponse = await callSharedUtil(
-      "tslib-putRecords",
-      taskWriteRequest,
-    );
+    });
   }
 
   // create assignments
   if (assignmentObjArray.length > 0) {
-    const assignmentWriteRequest = {
+    const assignmentWriteResponse = await callSpp("tslib-putRecords", {
       authObj: authObj,
       recordType: "Projecttaskassign",
       writeObj: assignmentObjArray,
-    };
-
-    const assignmentWriteResponse = await callSharedUtil(
-      "tslib-putRecords",
-      assignmentWriteRequest,
-    );
+    });
   }
 
   // only run on original load
@@ -928,16 +813,11 @@ export const handler = async (event) => {
       : 0;
   projectCalculations.previousBidGridAttachmentId__c = fileId;
 
-  const projectUpdateDetails = {
+  const projectUpdate = await callSpp("tslib-putRecords", {
     authObj: authObj,
     recordType: "Project",
     writeObj: projectCalculations,
-  };
-
-  const projectUpdate = await callSharedUtil(
-    "tslib-putRecords",
-    projectUpdateDetails,
-  );
+  });
 };
 
 function csvField(value) {

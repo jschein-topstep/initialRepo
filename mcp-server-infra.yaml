@@ -194,6 +194,26 @@ Resources:
         # debugging without a browser. Doesn't weaken the public-facing PKCE
         # flow Claude.ai actually uses -- that's unaffected either way.
         - ALLOW_ADMIN_USER_PASSWORD_AUTH
+  # Lets oauth-endpoints.js's /register self-register a new, trusted
+  # connector's redirect_uri into SppMcpUserPoolClient's callback allow-list
+  # (see that file's own comments) instead of that being a manual console
+  # step per connector. Scoped to ONLY this stack's own User Pool -- every
+  # customer's stack gets its own copy of this policy on the shared
+  # execution role, each only able to touch its own pool.
+  SppMcpCognitoDcrPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub "spp-mcp-cognito-dcr${ResourceSuffix}"
+      Roles:
+        - !Select [1, !Split ["/", !Ref LambdaExecutionRoleArn]]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - cognito-idp:DescribeUserPoolClient
+              - cognito-idp:UpdateUserPoolClient
+            Resource: !GetAtt SppMcpUserPool.Arn
 
   # -------------------------------------------------------
   # Lambda: the MCP server + OAuth metadata/DCR shim (ai/mcpServer/).
@@ -207,34 +227,35 @@ Resources:
         ImageUri: !Ref McpServerImageUri
       Role: !Ref LambdaExecutionRoleArn
       Timeout: 60
-      MemorySize: 3008 # bumped from 1024 -- this is also this AWS account's
-                       # actual Lambda memory ceiling right now, confirmed
-                       # by testing: 10240 (Lambda's own general maximum) is
-                       # rejected here with "value failed to satisfy
-                       # constraint: Member must have value less than or
-                       # equal to 3008", an account-level quota, not
-                       # something this template controls.
-                       #
-                       # AWS Lambda allocates CPU proportional to memory,
-                       # and this Lambda's cold-start table materialization
-                       # (DuckDB CSV parsing) is CPU-bound, not I/O-bound --
-                       # confirmed by testing:
-                       # running materialization concurrently (either on one
-                       # connection, which just serializes internally, or on
-                       # separate connections to the same shared instance)
-                       # gave ZERO speedup and sometimes made it slower
-                       # (contention), so parallelizing isn't the fix; more
-                       # CPU per table is. Matters far more for a
-                       # larger-data customer than for TopStep itself: this
-                       # API Gateway integration has a HARD 30-second
-                       # timeout (AWS's own platform maximum for HTTP APIs,
-                       # not something raising this Lambda's own Timeout
-                       # above can work around) -- confirmed happening in
-                       # production for BGB, whose larger tables alone
-                       # (e.g. one table took 14.5s at 1024 MB) blew well
-                       # past that cap on the very first "initialize" call,
-                       # which is what a Claude.ai connector add actually
-                       # sees as "Couldn't connect to the server."
+      MemorySize:
+        3008 # bumped from 1024 -- this is also this AWS account's
+        # actual Lambda memory ceiling right now, confirmed
+        # by testing: 10240 (Lambda's own general maximum) is
+        # rejected here with "value failed to satisfy
+        # constraint: Member must have value less than or
+        # equal to 3008", an account-level quota, not
+        # something this template controls.
+        #
+        # AWS Lambda allocates CPU proportional to memory,
+        # and this Lambda's cold-start table materialization
+        # (DuckDB CSV parsing) is CPU-bound, not I/O-bound --
+        # confirmed by testing:
+        # running materialization concurrently (either on one
+        # connection, which just serializes internally, or on
+        # separate connections to the same shared instance)
+        # gave ZERO speedup and sometimes made it slower
+        # (contention), so parallelizing isn't the fix; more
+        # CPU per table is. Matters far more for a
+        # larger-data customer than for TopStep itself: this
+        # API Gateway integration has a HARD 30-second
+        # timeout (AWS's own platform maximum for HTTP APIs,
+        # not something raising this Lambda's own Timeout
+        # above can work around) -- confirmed happening in
+        # production for BGB, whose larger tables alone
+        # (e.g. one table took 14.5s at 1024 MB) blew well
+        # past that cap on the very first "initialize" call,
+        # which is what a Claude.ai connector add actually
+        # sees as "Couldn't connect to the server."
       # No Layers here -- AWS does not support Lambda Layers on
       # PackageType: Image functions at all. oauthUtils.mjs/sharedUtils.js
       # (normally attached via the "sharedUtils" layer) are instead COPY'd
@@ -249,6 +270,7 @@ Resources:
           COGNITO_AUTHORIZATION_ENDPOINT: !Sub "https://${SppMcpUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com/oauth2/authorize"
           COGNITO_TOKEN_ENDPOINT: !Sub "https://${SppMcpUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com/oauth2/token"
           COGNITO_CLIENT_ID: !Ref SppMcpUserPoolClient
+          COGNITO_USER_POOL_ID: !Ref SppMcpUserPool
           MCP_SERVER_BASE_URL: !Sub "https://${SppMcpApi}.execute-api.${AWS::Region}.amazonaws.com"
           FILTER_CACHE_TABLE: !Ref SppFilterCacheTable
           SPP_BASE_OAUTH_CONFIG_KEY: !Ref SppBaseOAuthConfigKey
